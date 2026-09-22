@@ -1,0 +1,23 @@
+name: Package release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: node --input-type=module -e "import p from './package.json' with {type:'json'}; if (process.env.GITHUB_REF_NAME !== 'v'+p.version) process.exit(1)"
+      - run: npm run check
+      - run: npm pack
+      - run: sha256sum *.tgz > SHA256SUMS
+      - run: gh release create "$GITHUB_REF_NAME" ./*.tgz SHA256SUMS --verify-tag --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
