@@ -5,7 +5,7 @@
   "type": "module",
   "license": "MIT",
   "author": "jssblck",
-  "repository": { "type": "git", "url": "https://github.com/jssblck/t3threads.git" },
+  "repository": { "type": "git", "url": "https://github.com/attunehq/t3threads.git" },
   "bin": { "t3threads": "dist/bin.js" },
   "exports": { ".": { "types": "./dist/cli.d.ts", "import": "./dist/cli.js" } },
   "files": ["dist", "skills", "README.md", "LICENSE"],
