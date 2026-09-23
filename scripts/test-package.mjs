@@ -23,7 +23,7 @@ try {
   const windows = process.platform === "win32";
   const shim = windows ? join(prefix, "t3threads.cmd") : join(prefix, "bin", "t3threads");
   const help = windows
-    ? execFileSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", `""${shim}" --help"`], options)
+    ? execFileSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", `""${shim}" --help"`], { ...options, windowsVerbatimArguments: true })
     : execFileSync(shim, ["--help"], options);
   assert.match(help, /t3threads/);
   assert.match(help, /overview/);
