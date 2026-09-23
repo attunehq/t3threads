@@ -127,9 +127,17 @@ export function startCommand(project: Project, options: { prompt: string; title?
   };
 }
 
-export function sendCommand(thread: Thread, prompt: string) {
+export function sendCommand(thread: Thread, prompt: string, sender?: { ref: string; title: string; environmentId: string; replyRef: string }) {
   if (thread.deletedAt || thread.archivedAt) fail("THREAD_INACTIVE", "Restore this thread in T3 before sending a prompt.");
   if (thread.session?.activeTurnId || thread.latestTurn?.state === "running" || ["starting", "running"].includes(thread.session?.status ?? "")) fail("THREAD_BUSY", "The thread is running. Wait for it to finish before sending a follow-up.");
+  if (sender) prompt = `[t3threads agent message]
+From: agent in T3 thread ${JSON.stringify(sender.title)}
+Sender thread: ${sender.ref}
+Sender environment ID: ${sender.environmentId}
+This message is from another agent, not the user.
+To reply, use t3threads send with target ${sender.replyRef} and --caller set to your own T3 thread reference. If the target environment is unavailable, use a configured alias for the sender environment ID.
+
+${prompt}`;
   return { type: "thread.turn.start", commandId: crypto.randomUUID(), threadId: thread.id, message: { messageId: crypto.randomUUID(), role: "user", text: prompt, attachments: [] }, modelSelection: thread.modelSelection, runtimeMode: thread.runtimeMode, interactionMode: thread.interactionMode, createdAt: new Date().toISOString() };
 }
 

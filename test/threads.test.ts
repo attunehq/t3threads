@@ -111,9 +111,54 @@ test("Fetch API shares CLI validation and executes start/read/send through RPC",
   const id = result.data.threadId;
   const read = await call(`read/${id}`, {}, "GET");
   assert.equal(read.data.messages[0].text, "Implement");
-  assert.equal((await call(`send/${id}`, { prompt: "Test it" })).ok, true);
+  assert.equal((await call(`send/${id}`, { prompt: "Test it" })).ok, false);
+  assert.equal((await call(`send/${id}`, { prompt: "Test it", caller: "all:t1" })).ok, false);
+  assert.equal((await call(`send/${id}`, { prompt: "Test it", caller: "local:missing" })).ok, false);
+  assert.equal(f.commands.length, 1);
+  f.stored.get("t1")!.latestTurn = { state: "running" };
+  const promptFile = `${f.dir}/prompt.txt`;
+  await writeFile(promptFile, "Test it\nKeep the details.\n");
+  const sendOptions = { promptFile, caller: "local:t1" };
+  const preview = await call(`send/${id}`, { ...sendOptions, dryRun: true });
+  assert.equal(preview.ok, true, JSON.stringify(preview));
+  assert.equal(f.commands.length, 1);
+  assert.match(preview.data.command.message.text, /agent in T3 thread "Earlier design"/);
+  assert.match(preview.data.command.message.text, /Sender thread: local:t1/);
+  assert.match(preview.data.command.message.text, /Sender environment ID: test-env/);
+  assert.match(preview.data.command.message.text, /from another agent, not the user/);
+  assert.match(preview.data.command.message.text, /target local:t1 and --caller/);
+  assert.ok(preview.data.command.message.text.endsWith("\n\nTest it\nKeep the details.\n"));
+  assert.equal((await call(`send/${id}`, sendOptions)).ok, true);
+  assert.equal(f.commands[1]?.message.text, preview.data.command.message.text);
+  assert.equal(f.commands[1]?.runtimeMode, "approval-required");
   assert.equal(f.commands[1]?.interactionMode, "plan");
   assert.deepEqual(f.commands[1]?.modelSelection, project.defaultModelSelection);
+});
+
+test("send resolves caller independently of recipient environment and provides a cross-machine reply target", async t => {
+  const sender = await fixture(t, undefined, "sender-env");
+  const recipient = await fixture(t, undefined, "recipient-env");
+  sender.stored.get("t1")!.title = "Ada Lovelace's analysis";
+  const key = `T3_TEST_${crypto.randomUUID().replaceAll("-", "")}`;
+  process.env[key] = "test-secret"; t.after(() => { delete process.env[key]; });
+  await writeFile(sender.configPath, JSON.stringify({ environments: {
+    local: { home: sender.dir, command: sender.target.config.command },
+    remote: { url: recipient.target.origin, tokenEnv: key },
+  } }));
+  const cli = createCli();
+  const response = await cli.fetch(new Request("http://cli/send/t1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+    config: sender.configPath, env: "remote", caller: "t1", prompt: "Review the analysis.",
+  }) }));
+  const result = await response.json() as { ok: boolean };
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(sender.commands.length, 0);
+  assert.equal(recipient.commands.length, 1);
+  const text = recipient.commands[0]!.message.text;
+  assert.match(text, /agent in T3 thread "Ada Lovelace's analysis"/);
+  assert.match(text, /Sender thread: local:t1/);
+  assert.match(text, /Sender environment ID: sender-env/);
+  assert.match(text, /target connect-sender-env:t1 and --caller/);
+  assert.ok(text.endsWith("\n\nReview the analysis."));
 });
 
 test("named remote environments work without spawning the local auth CLI", async t => {
