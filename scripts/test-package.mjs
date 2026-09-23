@@ -27,6 +27,7 @@ try {
     : execFileSync(shim, ["--help"], options);
   assert.match(help, /t3threads/);
   assert.match(help, /overview/);
+  assert.match(help, /service/);
 
   const child = spawn(process.execPath, [join(installed, manifest.bin.t3threads), "--mcp"], {
     cwd: directory, env, stdio: ["pipe", "pipe", "pipe"],

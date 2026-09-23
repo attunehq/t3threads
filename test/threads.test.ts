@@ -53,6 +53,43 @@ test("busy or archived threads cannot be resumed implicitly", () => {
   assert.throws(() => sendCommand({ ...thread, archivedAt: "yesterday" }, "Go"), /Restore/);
 });
 
+test("explicit steering accepts every busy state and idle threads but still rejects inactive threads", () => {
+  for (const value of [thread, { ...thread, latestTurn: { state: "running" } },
+    ...["starting", "running", "ready"].map(status => ({ ...thread, session: { status, activeTurnId: "turn", lastError: null } })),
+  ]) {
+    const command = sendCommand(value, "1Password is available. Continue.", undefined, "steer");
+    assert.equal(command.type, "thread.turn.start");
+    assert.deepEqual(command.modelSelection, thread.modelSelection);
+  }
+  for (const field of ["archivedAt", "deletedAt"]) {
+    assert.throws(() => sendCommand({ ...thread, [field]: "today" }, "Continue", undefined, "steer"), { code: "THREAD_INACTIVE" });
+  }
+});
+
+test("send steering and enqueue previews share validation and attribution through Fetch", async t => {
+  const f = await fixture(t), cli = createCli();
+  f.stored.get("t1")!.latestTurn = { state: "running" };
+  const call = async (extra: object) => (await cli.fetch(new Request("http://cli/send/t1", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ config: f.configPath, caller: "local:t1", prompt: "Continue", ...extra }),
+  }))).json() as Promise<any>;
+  assert.equal((await call({})).error.code, "THREAD_BUSY");
+  assert.equal((await call({ steer: true, enqueue: true })).error.code, "INVALID_ARGUMENT");
+  assert.equal((await call({ steer: true, prompt: " " })).error.code, "PROMPT_REQUIRED");
+  for (const mode of ["steer", "enqueue"]) {
+    const preview = await call({ [mode]: true, dryRun: true });
+    assert.equal(preview.ok, true, JSON.stringify(preview));
+    assert.match(preview.data.command.message.text, /Sender thread: local:t1/);
+    assert.equal(f.commands.length, 0);
+  }
+  const sent = await call({ steer: true });
+  assert.equal(sent.data.status, "accepted");
+  assert.equal(f.commands.length, 1);
+  assert.equal(f.stored.get("t1")!.latestTurn?.state, "running");
+  f.stored.get("t1")!.archivedAt = "today";
+  assert.equal((await call({ enqueue: true })).error.code, "THREAD_INACTIVE");
+});
+
 test("temporary sessions are revoked after success and failure", async t => {
   const f = await fixture(t, (_req, res) => { json(res, { secret: "test-secret" }, 500); return true; });
   await withApi(f.target, async () => "ok");

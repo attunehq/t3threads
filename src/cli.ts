@@ -8,6 +8,8 @@ import { addWatch, cancelWatch, conditionSchema, ensureWorker, worker, type Watc
 import { State } from "./state.js";
 import { jevApiKey } from "./secrets.js";
 import { update } from "./update.js";
+import { cancelMessage, enqueue, type QueuedMessage } from "./queue.js";
+import { service } from "./service.js";
 
 const text = z.string().trim().min(1);
 const common = {
@@ -200,8 +202,13 @@ export function createCli(options: { signal?: AbortSignal } = {}) {
       args: z.object({ id: text }), run(c) { requirePost(c.request); return cancelWatch(c.args.id); },
     })
     .command("watch-run", {
-      description: "Run the durable watcher worker in the foreground (for a service manager).", mcp: false,
+      description: "Run the durable watcher and message delivery worker in the foreground (for a service manager).", mcp: false,
       async run(c) { requirePost(c.request); await worker(undefined, signalFor(c.request)); return { status: "stopped" }; },
+    })
+    .command("service", {
+      description: "Install, start, restart, inspect, or uninstall the macOS background delivery service. Follows installed package upgrades automatically.", mcp: false,
+      args: z.object({ action: z.enum(["install", "start", "restart", "status", "uninstall"]) }),
+      async run(c) { if (c.args.action !== "status") requirePost(c.request); return service(c.args.action); },
     })
     .command("manage", {
       description: "Interrupt, archive, restore, or rename a thread through native T3 orchestration.", mcp: write,
@@ -241,11 +248,15 @@ export function createCli(options: { signal?: AbortSignal } = {}) {
       },
     })
     .command("send", {
-      description: "Send an authorized agent follow-up to an idle T3 thread, identifying caller and preserving the recipient's settings. Resolve caller from list using your current worktree; provider conversation IDs are not T3 thread IDs. Not idempotent.", mcp: write,
+      description: "Send an authorized agent follow-up, identifying caller and preserving recipient settings. Use steer to send during a turn, or enqueue to persist until idle. Resolve caller from list using your worktree; provider conversation IDs are not T3 thread IDs. Not idempotent.", mcp: write,
       args: z.object({ thread: text.describe("Thread ID or environment:thread-ID") }),
-      options: z.object({ ...common, ...promptOptions, caller: text.describe("Sending agent's T3 thread reference (environment:thread-ID; bare IDs use local, independently of --env)") }),
+      options: z.object({ ...common, ...promptOptions, caller: text.describe("Sending agent's T3 thread reference (environment:thread-ID; bare IDs use local, independently of --env)"),
+        steer: z.boolean().default(false).describe("Send immediately, steering a running turn or starting an idle thread"),
+        enqueue: z.boolean().default(false).describe("Persist a follow-up for delivery when idle. Mutually exclusive with steer"),
+      }),
       async run(c) {
         requirePost(c.request);
+        if (c.options.steer && c.options.enqueue) fail("INVALID_ARGUMENT", "Choose either --steer or --enqueue, not both.");
         const prompt = await promptFrom(c.options);
         const caller = parseRef(c.options.caller);
         const sender = await withTarget({ config: c.options.config, home: caller.name === "local" ? c.options.home : undefined }, c.request, async (api, target, id) => ({
@@ -253,10 +264,25 @@ export function createCli(options: { signal?: AbortSignal } = {}) {
         }), c.options.caller);
         return withTarget(c.options, c.request, async (api, target, id) => {
           const replyRef = `${sender.environmentId === target.descriptor.environmentId ? "local" : `connect-${sender.environmentId}`}:${sender.id}`;
-          const command = sendCommand((await readThread(api, id!, 1)).thread, prompt, { ...sender, replyRef });
+          const command = sendCommand((await readThread(api, id!, 1)).thread, prompt, { ...sender, replyRef }, c.options.steer || c.options.enqueue ? "steer" : "idle");
+          if (c.options.enqueue) {
+            const preview = { ref: `${target.name}:${id}`, environmentId: target.descriptor.environmentId, options: { config: c.options.config ? expand(c.options.config) : undefined, home: target.name === "local" ? target.home : undefined }, command };
+            if (c.options.dryRun) return { ...context(target), ...preview, dryRun: true, delivery: "enqueue" };
+            const queued = enqueue(preview);
+            ensureWorker();
+            return { ...context(target), ref: queued.ref, threadId: id, queueId: queued.id, commandId: command.commandId, status: "queued" };
+          }
           return { ...context(target), ref: `${target.name}:${id}`, ...(c.options.dryRun ? { dryRun: true, command } : await dispatch(api, command)) };
         }, c.args.thread);
       },
+    })
+    .command("queued", {
+      description: "List locally persisted follow-ups, their delivery status, command IDs, and errors.", mcp: readOnly,
+      run() { return { messages: new State().list<QueuedMessage>("message").sort((a, b) => a.order - b.order) }; },
+    })
+    .command("unqueue", {
+      description: "Cancel a queued follow-up before dispatch starts. Cannot recall a dispatched message.", mcp: write,
+      args: z.object({ id: text }), run(c) { requirePost(c.request); return cancelMessage(c.args.id); },
     });
 }
 function expandProject(query: string) { return query.startsWith("~/") ? expand(query) : query; }

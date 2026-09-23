@@ -112,6 +112,15 @@ t3threads start --project PROJECT_ID --checkout worktree \
   --prompt-file /tmp/task.txt
 
 t3threads send local:THREAD_ID --caller local:CALLER_ID --prompt 'Continue with the tests.'
+
+t3threads send local:THREAD_ID --caller local:CALLER_ID --steer \
+  --prompt '1Password is available. Continue where you left off.'
+
+t3threads send local:THREAD_ID --caller local:CALLER_ID --enqueue \
+  --prompt 'When this turn finishes, run the integration tests.'
+
+t3threads queued
+t3threads unqueue QUEUE_ID
 ```
 
 Use `--checkout current` to work in the project's existing checkout. Each worktree
@@ -124,7 +133,33 @@ Start preserves the project's saved model and provider options. If no default is
 saved, specify `--provider INSTANCE --model MODEL`. Changing providers requires
 both flags. New threads default to `--permission approval-required` and
 `--mode default`; `--mode plan` starts a planning thread. Send preserves the
-thread's settings and rejects busy, deleted, or archived threads.
+thread's settings. Plain send rejects busy threads; all delivery modes reject
+deleted or archived threads.
+
+`--steer` sends immediately through T3's native turn command. T3 passes the
+message to the running provider; if the thread is idle, it starts a new turn.
+The provider controls when mid-turn input takes effect. `--enqueue` persists
+the message locally and returns `status: queued` with a `queueId`. The detached
+worker waits until the recipient is idle, checking about every five seconds,
+then dispatches using the recipient's current settings. These flags are mutually
+exclusive. MCP and Fetch callers use `steer: true` or `enqueue: true`.
+
+Queued follow-ups survive the sending process and worker restarts. Delivery
+attempts follow enqueue order per recipient, including environment aliases.
+Offline environments are retried; deleted, archived, missing, changed, or
+server-rejected recipients produce a visible `failed` entry. Use `queued` to
+inspect pending, dispatching, accepted, cancelled, and failed entries.
+`unqueue QUEUE_ID` cancels a pending entry; dispatch cannot be recalled once it
+starts. The worker persists a stable command ID before dispatch and reuses it
+for T3 receipt deduplication after a crash or lost response.
+
+The enqueueing machine must remain running for delivery. On macOS, install the
+background service once with `t3threads service install` to resume delivery
+automatically at login and after worker crashes. This is t3threads' durable queue, separate from T3's UI
+queue. The idle check and dispatch are separate operations, so another client
+can start a turn between them. `--dry-run --enqueue` previews the attributed
+message without storing it or starting a worker; settings are refreshed at
+delivery.
 
 Send requires `--caller ENV:THREAD_ID` (`caller` in MCP/API) to identify the
 sending agent's T3 thread. Resolve it with `list` using the agent's current
@@ -288,7 +323,7 @@ Watchers persist immediately and start a detached worker. Default polling is
 30 seconds (`--interval-seconds`), with a 24-hour lifetime (`--expires-in-hours`).
 The worker continues after the CLI/MCP exits. Registration and any later CLI/MCP
 startup restart pending watchers after a worker/process crash or machine reboot.
-For unattended restart at login, run `t3threads watch-run` under a service manager.
+For unattended restart at login on macOS, install the background service below.
 No model runs for deterministic status checks. Semantic decisions are reused
 until the input changes.
 
@@ -302,6 +337,52 @@ without waking a caller. Expiration also ends pending delivery attempts.
 
 `manage THREAD --action interrupt|archive|unarchive|rename` uses T3 orchestration;
 renaming requires `--title`. `--dry-run` returns the command without applying it.
+
+## Background service (macOS)
+
+```sh
+t3threads service install
+t3threads service start
+t3threads service status
+t3threads service restart
+```
+
+Install once from a permanent, built installation of t3threads. The per-user
+LaunchAgent starts at login, keeps the shared watcher/message worker ready even
+when idle, and restarts it after a crash. No terminal, CLI, or MCP session needs
+to stay open. It shares the worker lease with detached workers so only one
+process delivers messages at a time. T3 Code must also be running; unavailable
+servers are retried automatically.
+
+The service follows upgrades to the installed package automatically. Update
+t3threads with your existing package manager, such as `npm install --global
+t3threads@latest` or `volta install t3threads@latest`. The worker checks the
+installed runtime every five seconds. After observing stable changed files, it
+finishes its current delivery pass, releases the worker lease, and exits so
+launchd loads the updated code. Queued messages and watchers remain in the same
+state directory. This works with `--ignore-scripts` and with same-version local
+builds; reinstalling identical code does not cause a restart. The service does
+not download releases or update npm/Volta packages itself.
+
+Repeating `service install` with an unchanged definition preserves the running
+worker. `service start` loads an installed service if needed; `service restart`
+explicitly reloads it. Both use the installed plist, preserving its state and
+configuration paths even when invoked from another shell environment.
+
+The agent is `~/Library/LaunchAgents/com.attune.t3threads.plist`. Its log is
+`service.log` in the state directory. Login Items identifies it as **T3 Threads**
+through a private launcher at `service/T3 Threads` in that directory. The
+launcher executes Node without adding a supervisor process. No signing
+certificate is needed for this local service identity. Installation preserves
+the selected state directory, PATH, and configuration locations; it does not copy shell secrets
+into the plist. T3 Connect and Keychain credentials remain available. Credentials
+supplied only through shell environment variables must also be available to the
+service environment.
+
+`t3threads service uninstall` stops the service and removes automatic startup,
+preserving queued messages, watchers, and other state. Reinstall after moving
+the package or Node executable. Service management currently supports macOS;
+`watch-run` remains available for foreground delivery on other platforms.
 
 ## Jev classifiers
 
@@ -325,8 +406,9 @@ Thread text is sent to TypeSafe only when a Jev operation is explicitly selected
 State is in `$T3THREADS_STATE_DIR`, or `$XDG_STATE_HOME/t3threads`, defaulting to
 `~/.local/state/t3threads`. The directory is private and its database uses mode
 0600. This is t3threads' own database; T3's database is never opened. It contains
-cached thread text, model results, watch records, and environment session keys.
-Deleting it clears these caches and registrations.
+cached thread text, model results, watch records, queued prompts and delivery
+records, and environment session keys. Deleting it clears these caches,
+registrations, and undelivered messages.
 
 ## Development
 
@@ -338,7 +420,8 @@ npm run dev -- doctor --json
 
 The tests cover native credential reuse, DPoP signatures/exchange, cross-machine
 partial results, pagination, model-result caching, Jev validation, durable watcher
-delivery/recovery/cancellation, a detached worker, CLI/API validation, and real
+delivery/recovery/cancellation, steering, durable queued follow-ups, a detached
+worker, CLI/API validation, and real
 stdio/HTTP MCP transports against disposable protocol fixtures. They do not
 require accounts or invoke models.
 
