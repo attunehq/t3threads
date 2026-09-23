@@ -119,7 +119,7 @@ test("Fetch API shares CLI validation and executes start/read/send through RPC",
 test("named remote environments work without spawning the local auth CLI", async t => {
   const f = await fixture(t); const key = `T3_TEST_${crypto.randomUUID().replaceAll("-", "")}`;
   process.env[key] = "test-secret"; t.after(() => { delete process.env[key]; });
-  await writeFile(f.configPath, JSON.stringify({ environments: { remote: { url: f.target.origin, tokenEnv: key } } }));
+  await writeFile(f.configPath, JSON.stringify({ environments: { local: { home: f.dir, command: f.target.config.command }, remote: { url: f.target.origin, tokenEnv: key } } }));
   const cli = createCli(); const query = new URLSearchParams({ config: f.configPath });
   const r = await (await cli.fetch(new Request(`http://cli/read/remote:t1?${query}`))).json() as { ok: boolean; data: { environment: string } };
   assert.equal(r.ok, true); assert.equal(r.data.environment, "remote"); assert.equal(await exists(f.authLog), false);

@@ -18,8 +18,10 @@ export const expand = (path: string) => resolve(path.replace(/^~(?=\/|$)/, homed
 export const exists = (path: string) => access(path).then(() => true, () => false);
 const exec = promisify(execFile);
 
-export type Environment = { home?: string; command?: string[]; url?: string; tokenEnv?: string };
-export type Descriptor = { environmentId: string; serverVersion: string; orchestrationProtocolVersion: number; capabilities?: Record<string, unknown> };
+export type ConnectConfig = { relayUrl?: string; issuerUrl?: string; jwtTemplate?: string; home?: string };
+export type Configuration = { environments: Record<string, Environment>; connect?: ConnectConfig };
+export type Environment = { home?: string; command?: string[]; url?: string; tokenEnv?: string; connectId?: string; connect?: ConnectConfig; label?: string };
+export type Descriptor = { environmentId: string; serverVersion: string; orchestrationProtocolVersion?: number; capabilities?: Record<string, unknown> };
 export type Target = { name: string; home?: string; origin: string; descriptor: Descriptor; config: Environment };
 
 export async function run(command: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string } = {}) {
@@ -29,15 +31,20 @@ export async function run(command: string[], options: { env?: NodeJS.ProcessEnv;
   } catch { return { stdout: "", stderr: "", status: 1 }; }
 }
 
-export async function readConfig(path: string, explicit = false): Promise<Record<string, Environment>> {
+export async function configuration(path: string, explicit = false): Promise<Configuration> {
   if (!await exists(path)) {
     if (explicit) fail("CONFIG_NOT_FOUND", "The specified configuration file does not exist.");
-    return {};
+    return { environments: {} };
   }
   let data;
   try { data = object(JSON.parse(await readFile(path, "utf8"))); }
   catch { return fail("INVALID_CONFIG", "Configuration must be a JSON object with an environments map."); }
-  const environments = object(data.environments);
+  const environments = object(data.environments ?? {});
+  if (data.connect !== undefined) {
+    const connect = object(data.connect);
+    if (Object.keys(connect).some(k => !["relayUrl", "issuerUrl", "jwtTemplate", "home"].includes(k)) || Object.values(connect).some(v => typeof v !== "string" || !v.trim())) fail("INVALID_CONFIG", "Invalid Connect configuration.");
+    for (const key of ["relayUrl", "issuerUrl"]) if (typeof connect[key] === "string") originOnly(connect[key]);
+  }
   for (const [name, raw] of Object.entries(environments)) {
     const e = object(raw);
     if (!/^[a-zA-Z0-9_-]+$/.test(name)) fail("INVALID_CONFIG", "Environment names must contain only letters, numbers, underscores, or hyphens.");
@@ -46,10 +53,11 @@ export async function readConfig(path: string, explicit = false): Promise<Record
     if (e.command !== undefined && (!Array.isArray(e.command) || !e.command.length || e.command.some((x: unknown) => typeof x !== "string" || !x))) fail("INVALID_CONFIG", `command in ${name} must be an argument array.`);
     if (e.url ? !e.tokenEnv || e.home || e.command : e.tokenEnv) fail("INVALID_CONFIG", `Use either home/command or url/tokenEnv in ${name}.`);
   }
-  return environments as Record<string, Environment>;
+  return { environments: environments as Record<string, Environment>, ...(data.connect ? { connect: data.connect as ConnectConfig } : {}) };
 }
+export async function readConfig(path: string, explicit = false) { return (await configuration(path, explicit)).environments; }
 
-function originOnly(raw: string) {
+export function originOnly(raw: string) {
   let u: URL;
   try { u = new URL(raw); } catch { return fail("INVALID_URL", "Environment URL is invalid."); }
   if (!["http:", "https:"].includes(u.protocol) || u.username || u.password || u.search || u.hash || u.pathname !== "/") fail("INVALID_URL", "Environment URL must be an HTTP(S) origin without credentials, a path, or query parameters.");
@@ -71,7 +79,8 @@ export async function discover(name: string, config: Environment, signal?: Abort
   catch { return fail("SERVER_UNREACHABLE", "Cannot reach the selected T3 server."); }
   if (!response.ok) fail("SERVER_UNREACHABLE", `T3 descriptor returned HTTP ${response.status}.`);
   const descriptor = object(await response.json());
-  if (descriptor.orchestrationProtocolVersion !== 1 || typeof descriptor.environmentId !== "string" || typeof descriptor.serverVersion !== "string") fail("UNSUPPORTED_SERVER", "This CLI requires T3 orchestration protocol 1.");
+  const legacy = descriptor.orchestrationProtocolVersion === undefined && typeof descriptor.serverVersion === "string" && /^0\.0\.(42|43)(-|$)/.test(descriptor.serverVersion);
+  if ((!legacy && descriptor.orchestrationProtocolVersion !== 1) || typeof descriptor.environmentId !== "string" || typeof descriptor.serverVersion !== "string") fail("UNSUPPORTED_SERVER", "This CLI requires T3 orchestration protocol 1 or the known 0.0.42/43 legacy descriptor.");
   if (descriptor.capabilities !== undefined) object(descriptor.capabilities);
   return { name, home, origin: origin as string, descriptor: descriptor as Descriptor, config };
 }
@@ -99,17 +108,18 @@ export async function invocation(target: Target): Promise<{ command: string[]; e
 }
 
 export class Api {
-  constructor(public target: Target, private token: string, private signal?: AbortSignal) {}
+  constructor(public target: Target, private token: string, private signal?: AbortSignal, private authorization?: (method: string, url: string) => Promise<Record<string, string>>) {}
   async request<T = unknown>(path: string, body?: unknown): Promise<T> {
     let response: Response;
     try {
       response = await fetch(`${this.target.origin}${path}`, {
         method: body === undefined ? "GET" : "POST", redirect: "error",
-        headers: { authorization: `Bearer ${this.token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+        headers: { ...(this.authorization ? await this.authorization(body === undefined ? "GET" : "POST", `${this.target.origin}${path}`) : { authorization: `Bearer ${this.token}` }), ...(body === undefined ? {} : { "content-type": "application/json" }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(this.signal ? [this.signal] : [])]),
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof CliError) throw error;
       return fail("REQUEST_FAILED", body === undefined ? "T3 request failed or was cancelled." : "Dispatch outcome is unknown. Inspect the thread before retrying; the command may have been accepted.");
     }
     // Do not echo server errors: they can contain prompts, paths, or credentials.
@@ -162,7 +172,7 @@ export class Api {
               let message = "T3 rejected the command. Inspect the thread and server logs before retrying.";
               if (Array.isArray(exit.cause)) {
                 const failure = exit.cause.find(raw => raw?._tag === "Fail" && typeof raw.error?.message === "string");
-                if (failure) message = failure.error.message.replaceAll(this.token, "[redacted]").replaceAll(ticket.ticket, "[redacted]");
+                if (failure && this.token) message = failure.error.message.replaceAll(this.token, "[redacted]").replaceAll(ticket.ticket, "[redacted]");
               }
               return finish(new CliError("RPC_REJECTED", message));
             }
@@ -175,6 +185,10 @@ export class Api {
 }
 
 export async function withApi<T>(target: Target, fn: (api: Api) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (target.config.connectId) {
+    const { connectApi } = await import("./connect.js");
+    return fn(await connectApi(target, signal));
+  }
   if (!target.home) {
     const token = process.env[target.config.tokenEnv!];
     if (!token) fail("TOKEN_REQUIRED", "The configured token environment variable is empty.");
