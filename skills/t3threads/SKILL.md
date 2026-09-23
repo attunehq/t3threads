@@ -50,6 +50,19 @@ do not silently switch providers. New threads default to approval-required.
 Set a different permission mode only when the work is authorized for it.
 
 Use `send ENV:THREAD_ID --caller ENV:CALLER_ID --prompt TEXT` for an idle thread.
+Add `--steer` to send immediately during a turn (or start a turn if idle).
+Add `--enqueue` to persist a follow-up until the thread becomes idle. These
+flags are mutually exclusive; MCP uses `steer: true` or `enqueue: true`.
+Enqueue returns `status: queued` and a `queueId`. Use `queued` to inspect
+delivery or errors and `unqueue QUEUE_ID` to cancel before dispatch begins.
+The local background worker delivers in order per recipient and retries
+offline environments. On macOS, `service install` enables automatic startup at
+login and recovery after crashes; `service status` reports its state. An
+installed service handles restarts without manual `watch-run` commands and
+automatically adopts npm/Volta package upgrades at its installed location.
+`service start` restores an unloaded service; `service restart` explicitly
+reloads it while preserving the installed configuration.
+Do not create a retry loop or resend a message already in the durable queue.
 Caller is required: resolve your own T3 thread with `list` using the current
 worktree, not a provider conversation ID. Bare caller IDs mean local regardless
 of the recipient's `--env`. Send prefixes the prompt with your thread title,
