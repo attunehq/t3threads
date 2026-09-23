@@ -17,6 +17,16 @@ npm install --global t3threads
 t3threads doctor
 ```
 
+Update an installed copy to the latest npm release:
+
+```sh
+t3threads update
+```
+
+This runs `npm install --global t3threads@latest` using npm on your PATH and its
+configured registry and global prefix. npm must be installed and the prefix must
+be writable. Restart running MCP servers to use the updated version.
+
 From a checkout:
 
 ```sh
@@ -30,7 +40,7 @@ To distribute an npm tarball:
 
 ```sh
 npm pack
-npm install --global ./t3threads-0.2.0.tgz
+npm install --global ./t3threads-0.2.1.tgz
 ```
 
 `npm pack --dry-run` shows exactly what ships. Runtime code is compiled JavaScript;
