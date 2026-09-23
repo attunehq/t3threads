@@ -81,14 +81,31 @@ test("real watcher runtime reads T3 and dispatches a wake-up preserving caller s
 });
 
 test("a CLI-created watcher outlives its caller process and emits an event", { timeout: 15_000 }, async t => {
-  const f = await fixture(t), state = new State(f.dir + "/worker-state");
+  let workerPid: number | undefined, state: State | undefined;
+  // Hooks run in registration order: stop the worker before the fixture removes its files on Windows.
   t.after(async () => {
-    const lease = state.get<{ pid: number }>("worker", "lease");
-    if (lease) { try { process.kill(lease.pid, "SIGTERM"); } catch {} await delay(200); }
+    const pid = workerPid ?? state?.get<{ pid: number }>("worker", "lease")?.pid;
+    if (!pid) return;
+    const running = () => {
+      try { process.kill(pid, 0); return true; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return false; throw error; }
+    };
+    if (running()) { try { process.kill(pid, "SIGTERM"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; } }
+    const deadline = Date.now() + 5_000;
+    while (running() && Date.now() < deadline) await delay(50);
+    assert.equal(running(), false, "the detached worker must exit before its files are removed");
   });
+  const f = await fixture(t);
+  state = new State(f.dir + "/worker-state");
   const { stdout } = await promisify(execFile)(process.execPath, ["--import", "tsx", "src/bin.ts", "watch", "--config", f.configPath, "--threads", "local:t1", "--events-only", "--condition", "changed", "--interval-seconds", "5", "--json"], { env: { ...process.env, T3THREADS_STATE_DIR: state.directory } });
   const created = JSON.parse(stdout) as Watch;
   assert.equal(created.status, "active");
+  const startupDeadline = Date.now() + 5_000;
+  while (!workerPid && Date.now() < startupDeadline) {
+    workerPid = state.get<{ pid: number }>("worker", "lease")?.pid;
+    if (!workerPid) await delay(50);
+  }
+  assert.ok(workerPid, "the detached worker acquired its lease after the CLI exited");
   f.stored.get("t1")!.updatedAt = "2030-01-01T00:00:00Z";
   const deadline = Date.now() + 10_000;
   while (state.get<Watch>("watch", created.id)?.status === "active" && Date.now() < deadline) await delay(50);
