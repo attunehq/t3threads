@@ -10,7 +10,14 @@ or a second copy of T3. T3 Code must be running on the target machine.
 
 ## Install
 
-From a checkout (the package has not been published yet):
+Install with Node.js 22.16 or newer:
+
+```sh
+npm install --global t3threads
+t3threads doctor
+```
+
+From a checkout:
 
 ```sh
 npm ci
@@ -26,7 +33,6 @@ npm pack
 npm install --global ./t3threads-0.2.0.tgz
 ```
 
-After publication, installation will be `npm install --global t3threads`.
 `npm pack --dry-run` shows exactly what ships. Runtime code is compiled JavaScript;
 TypeScript, tests, and the development WebSocket server dependency are not shipped.
 
@@ -333,7 +339,25 @@ HTTP shell and per-thread snapshots. Writes use `orchestration.dispatchCommand`
 over authenticated WebSocket, including T3's thread/worktree bootstrap. The HTTP
 dispatch route does not perform that bootstrap.
 
-CI tests Node 22 and 24 on macOS, Linux, and Windows. The release workflow tests
-and packs an installable tarball on a `v*` tag; it does not publish to npm.
+CI tests Node 22 and 24 on macOS, Linux, and Windows. It also installs the packed
+tarball into a temporary global prefix and checks the CLI and stdio MCP startup
+outside the checkout, without install scripts or development dependencies.
+Run this check locally with `npm pack && npm run test:package`.
+
+### Releases
+
+The release workflow checks, packs, and smoke-tests the package on a `v*` tag.
+It publishes the tested tarball to npm, then attaches it and its SHA-256 checksum
+to a GitHub release. The tag must match the version in `package.json`.
+
+For a release, update the version with `npm version patch` (or `minor`/`major`),
+then push the release commit and its version tag. Use a new version for every
+npm release; published versions cannot be overwritten.
+
+Publishing uses [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
+with GitHub organization `attunehq`, repository `t3threads`, and workflow file
+`release.yml`. The npm package's trusted publisher must allow `npm publish`.
+No npm publishing token is stored in GitHub. The initial publication requires
+an npm maintainer login before this package-level trust can be configured.
 
 MIT licensed. Independent project; not affiliated with T3.
