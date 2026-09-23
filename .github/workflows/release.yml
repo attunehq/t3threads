@@ -1,9 +1,10 @@
-name: Package release
+name: Publish release
 on:
   push:
     tags: ['v*']
 permissions:
   contents: write
+  id-token: write
 jobs:
   package:
     runs-on: ubuntu-latest
@@ -12,12 +13,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@11.19.0
       - run: npm ci
       - run: node --input-type=module -e "import p from './package.json' with {type:'json'}; if (process.env.GITHUB_REF_NAME !== 'v'+p.version) process.exit(1)"
       - run: npm run check
       - run: npm pack
+      - run: npm run test:package
       - run: sha256sum *.tgz > SHA256SUMS
+      - run: npm publish ./*.tgz --access public
       - run: gh release create "$GITHUB_REF_NAME" ./*.tgz SHA256SUMS --verify-tag --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
