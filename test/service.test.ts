@@ -162,7 +162,7 @@ test("a persistent worker exits gracefully after a package update and its succes
   assert.equal(f.commands.length, 1);
 });
 
-test("persistent worker stays ready while idle, delivers later enqueues, and releases its lease on shutdown", { timeout: 15_000 }, async t => {
+test("persistent worker stays ready while idle, delivers later enqueues, and handles shutdown leases", { timeout: 15_000 }, async t => {
   let child: ReturnType<typeof spawn> | undefined;
   t.after(async () => {
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
@@ -170,7 +170,6 @@ test("persistent worker stays ready while idle, delivers later enqueues, and rel
     child.kill("SIGTERM");
     const timer = setTimeout(() => child?.kill("SIGKILL"), 3000);
     await ended; clearTimeout(timer);
-    assert.equal(child.signalCode, null, "shutdown must be graceful");
   });
   const f = await fixture(t), state = new State(join(f.dir, "state"));
   state.put("worker", "lease", { owner: "existing-worker", pid: process.pid });
@@ -195,6 +194,14 @@ test("persistent worker stays ready while idle, delivers later enqueues, and rel
   const ended = once(child, "exit");
   child.kill("SIGTERM");
   await ended;
+  if (process.platform === "win32") {
+    // Windows force-terminates on SIGTERM; the next worker must reclaim the stale lease.
+    assert.equal(state.get<{ pid: number }>("worker", "lease")?.pid, child.pid);
+    child = spawn(process.execPath, ["--import", "tsx", "src/worker.ts"], {
+      env: { ...process.env, T3THREADS_STATE_DIR: state.directory }, stdio: "ignore",
+    });
+    await once(child, "exit");
+  }
   assert.equal(state.get("worker", "lease"), undefined);
   assert.equal(child.exitCode, 0);
 });

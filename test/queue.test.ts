@@ -145,10 +145,14 @@ test("CLI enqueue outlives the sending process, exposes status, and supports can
   t.after(async () => {
     const pid = state?.get<{ pid: number }>("worker", "lease")?.pid;
     if (!pid) return;
+    const running = () => {
+      try { process.kill(pid, 0); return true; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return false; throw error; }
+    };
     try { process.kill(pid, "SIGTERM"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
     const deadline = Date.now() + 5000;
-    while (state?.get("worker", "lease") && Date.now() < deadline) await delay(50);
-    assert.equal(state?.get("worker", "lease"), undefined);
+    while (running() && Date.now() < deadline) await delay(50);
+    assert.equal(running(), false, "the detached worker must exit before its files are removed");
   });
   const f = await fixture(t);
   state = new State(f.dir + "/worker-state");
