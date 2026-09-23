@@ -40,11 +40,16 @@ test("stdio MCP advertises schemas and runs the same read and write commands", {
   child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
   const listed = await call("tools/list");
   const tools = listed.result.tools as { name: string; annotations: { readOnlyHint: boolean; idempotentHint: boolean }; inputSchema: { properties: Record<string, unknown> } }[];
-  assert.deepEqual(tools.map(t => t.name).sort(), ["doctor", "environments", "list", "projects", "read", "search", "send", "start"]);
+  assert.deepEqual(tools.map(t => t.name).sort(), ["classify", "doctor", "environments", "find", "list", "manage", "overview", "projects", "read", "search", "send", "start", "summarize", "unwatch", "watch", "watchers"]);
   assert.equal(tools.find(t => t.name === "read")?.annotations.readOnlyHint, true);
   assert.equal(tools.find(t => t.name === "start")?.annotations.readOnlyHint, false);
   assert.equal(tools.find(t => t.name === "start")?.annotations.idempotentHint, false);
   assert.ok(tools.find(t => t.name === "read")?.inputSchema.properties.env);
+  assert.equal(tools.find(t => t.name === "watch")?.annotations.readOnlyHint, false);
+  assert.ok(tools.find(t => t.name === "watch")?.inputSchema.properties.condition);
+  const overview = await call("tools/call", { name: "overview", arguments: { config: f.configPath, env: "local" } });
+  assert.ok(!overview.result.isError, JSON.stringify(overview));
+  assert.ok(JSON.stringify(overview.result).includes("local:t1"));
   const doctor = await call("tools/call", { name: "doctor", arguments: { config: f.configPath } });
   assert.ok(!doctor.result.isError, JSON.stringify(doctor));
   const start = await call("tools/call", { name: "start", arguments: { config: f.configPath, project: "p1", checkout: "worktree", branch: "main", prompt: "Review this task" } });

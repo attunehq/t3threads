@@ -1,15 +1,32 @@
 {
   "name": "t3threads",
-  "version": "0.1.0",
-  "description": "Read, search, and start T3 Code threads from a CLI, MCP server, or Fetch API.",
+  "version": "0.2.0",
+  "description": "Discover, search, summarize, classify, watch, and manage T3 Code threads across machines.",
   "type": "module",
   "license": "MIT",
   "author": "jssblck",
-  "repository": { "type": "git", "url": "https://github.com/attunehq/t3threads.git" },
-  "bin": { "t3threads": "dist/bin.js" },
-  "exports": { ".": { "types": "./dist/cli.d.ts", "import": "./dist/cli.js" } },
-  "files": ["dist", "skills", "README.md", "LICENSE"],
-  "engines": { "node": ">=22.16.0" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/attunehq/t3threads.git"
+  },
+  "bin": {
+    "t3threads": "dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    }
+  },
+  "files": [
+    "dist",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.16.0"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
@@ -18,6 +35,15 @@
     "prepack": "npm run build",
     "dev": "node --import tsx src/bin.ts"
   },
-  "dependencies": { "incur": "0.5.1" },
-  "devDependencies": { "@types/node": "^22.0.0", "tsx": "^4.21.0", "typescript": "^7.0.2", "ws": "^8.18.0", "@types/ws": "^8.18.0" }
+  "dependencies": {
+    "incur": "0.5.1",
+    "smol-toml": "1.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.0",
+    "tsx": "^4.21.0",
+    "typescript": "^7.0.2",
+    "ws": "^8.18.0"
+  }
 }

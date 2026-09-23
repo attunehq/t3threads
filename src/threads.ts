@@ -4,7 +4,7 @@ import { Api, fail, object, run } from "./client.js";
 export type Model = { instanceId: string; model: string; options?: unknown };
 export type Project = { id: string; title: string; workspaceRoot: string; defaultModelSelection: Model | null; deletedAt?: string | null };
 export type Thread = {
-  id: string; projectId: string; title: string; updatedAt: string; archivedAt?: string | null; deletedAt?: string | null;
+  id: string; projectId: string; title: string; updatedAt: string; archivedAt?: string | null; deletedAt?: string | null; settledAt?: string | null;
   modelSelection: Model; runtimeMode: string; interactionMode: string; branch: string | null; worktreePath: string | null;
   latestTurn?: { state: string } | null; session?: { status: string; activeTurnId: string | null; lastError: string | null } | null;
   messages?: { id: string; role: string; text: string; createdAt: string; attachments?: unknown[] }[];
@@ -133,7 +133,7 @@ export function sendCommand(thread: Thread, prompt: string) {
   return { type: "thread.turn.start", commandId: crypto.randomUUID(), threadId: thread.id, message: { messageId: crypto.randomUUID(), role: "user", text: prompt, attachments: [] }, modelSelection: thread.modelSelection, runtimeMode: thread.runtimeMode, interactionMode: thread.interactionMode, createdAt: new Date().toISOString() };
 }
 
-export async function dispatch(api: Api, command: ReturnType<typeof startCommand> | ReturnType<typeof sendCommand>) {
+export async function dispatch(api: Api, command: { type: string; threadId: string; commandId: string; [key: string]: unknown }) {
   try {
     // Bootstrap/worktree handling lives in T3's RPC layer, not HTTP dispatch.
     const receipt = object(await api.rpc("orchestration.dispatchCommand", command));

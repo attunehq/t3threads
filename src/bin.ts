@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createCli } from "./cli.js";
+import { ensureWorker } from "./watchers.js";
 
 const controller = new AbortController();
 const stop = () => {
@@ -8,4 +9,5 @@ const stop = () => {
 };
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);
+if (!process.argv.includes("watch-run")) ensureWorker();
 await createCli({ signal: controller.signal }).serve();
