@@ -2,7 +2,7 @@ import { Cli, Errors, z } from "incur";
 import { readFile } from "node:fs/promises";
 import { Api, CliError, expand, fail, withApi, type Target } from "./client.js";
 import { catalog, dispatch, localBranch, readAll, readThread, search, selectProject, selection, sendCommand, startCommand, summary } from "./threads.js";
-import { across, environments, targetFor, context, safeError, type Common } from "./environments.js";
+import { across, environments, targetFor, context, parseRef, safeError, type Common } from "./environments.js";
 import { card, generator, jev, questionsSchema, semanticSearch, status, summarize } from "./intelligence.js";
 import { addWatch, cancelWatch, conditionSchema, ensureWorker, worker, type Watch } from "./watchers.js";
 import { State } from "./state.js";
@@ -236,14 +236,19 @@ export function createCli(options: { signal?: AbortSignal } = {}) {
       },
     })
     .command("send", {
-      description: "Send an authorized follow-up to an idle T3 thread, preserving its settings. Not idempotent.", mcp: write,
+      description: "Send an authorized agent follow-up to an idle T3 thread, identifying caller and preserving the recipient's settings. Resolve caller from list using your current worktree; provider conversation IDs are not T3 thread IDs. Not idempotent.", mcp: write,
       args: z.object({ thread: text.describe("Thread ID or environment:thread-ID") }),
-      options: z.object({ ...common, ...promptOptions }),
+      options: z.object({ ...common, ...promptOptions, caller: text.describe("Sending agent's T3 thread reference (environment:thread-ID; bare IDs use local, independently of --env)") }),
       async run(c) {
         requirePost(c.request);
         const prompt = await promptFrom(c.options);
+        const caller = parseRef(c.options.caller);
+        const sender = await withTarget({ config: c.options.config, home: caller.name === "local" ? c.options.home : undefined }, c.request, async (api, target, id) => ({
+          ref: `${target.name}:${id}`, title: (await readThread(api, id!, 1)).thread.title, environmentId: target.descriptor.environmentId, id: id!,
+        }), c.options.caller);
         return withTarget(c.options, c.request, async (api, target, id) => {
-          const command = sendCommand((await readThread(api, id!, 1)).thread, prompt);
+          const replyRef = `${sender.environmentId === target.descriptor.environmentId ? "local" : `connect-${sender.environmentId}`}:${sender.id}`;
+          const command = sendCommand((await readThread(api, id!, 1)).thread, prompt, { ...sender, replyRef });
           return { ...context(target), ref: `${target.name}:${id}`, ...(c.options.dryRun ? { dryRun: true, command } : await dispatch(api, command)) };
         }, c.args.thread);
       },

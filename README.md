@@ -95,7 +95,7 @@ t3threads start --project PROJECT_ID --checkout worktree \
 t3threads start --project PROJECT_ID --checkout worktree \
   --prompt-file /tmp/task.txt
 
-t3threads send local:THREAD_ID --prompt 'Continue with the tests.'
+t3threads send local:THREAD_ID --caller local:CALLER_ID --prompt 'Continue with the tests.'
 ```
 
 Use `--checkout current` to work in the project's existing checkout. Each worktree
@@ -109,6 +109,16 @@ saved, specify `--provider INSTANCE --model MODEL`. Changing providers requires
 both flags. New threads default to `--permission approval-required` and
 `--mode default`; `--mode plan` starts a planning thread. Send preserves the
 thread's settings and rejects busy, deleted, or archived threads.
+
+Send requires `--caller ENV:THREAD_ID` (`caller` in MCP/API) to identify the
+sending agent's T3 thread. Resolve it with `list` using the agent's current
+worktree; provider conversation IDs are different. Bare caller IDs mean local,
+independently of the recipient's `--env`. Existing send scripts must add caller.
+Messages include the sender's thread title, reference, environment ID, and reply
+target, explicitly identifying them as agent messages rather than user messages.
+Reply targets use `local` on the same environment and `connect-ENV_ID` across
+machines; direct-only setups must map that environment ID to a configured alias.
+`--dry-run` includes the complete attributed message.
 
 A new thread does not inherit the calling conversation. Include the task,
 necessary context, completion criteria, and action limits in its prompt.

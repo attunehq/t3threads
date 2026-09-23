@@ -39,7 +39,7 @@ test("stdio MCP advertises schemas and runs the same read and write commands", {
   assert.equal(initialized.result.serverInfo.name, "t3threads");
   child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
   const listed = await call("tools/list");
-  const tools = listed.result.tools as { name: string; annotations: { readOnlyHint: boolean; idempotentHint: boolean }; inputSchema: { properties: Record<string, unknown> } }[];
+  const tools = listed.result.tools as { name: string; annotations: { readOnlyHint: boolean; idempotentHint: boolean }; inputSchema: { properties: Record<string, unknown>; required?: string[] } }[];
   assert.deepEqual(tools.map(t => t.name).sort(), ["classify", "doctor", "environments", "find", "list", "manage", "overview", "projects", "read", "search", "send", "start", "summarize", "unwatch", "watch", "watchers"]);
   assert.equal(tools.find(t => t.name === "read")?.annotations.readOnlyHint, true);
   assert.equal(tools.find(t => t.name === "start")?.annotations.readOnlyHint, false);
@@ -47,6 +47,7 @@ test("stdio MCP advertises schemas and runs the same read and write commands", {
   assert.ok(tools.find(t => t.name === "read")?.inputSchema.properties.env);
   assert.equal(tools.find(t => t.name === "watch")?.annotations.readOnlyHint, false);
   assert.ok(tools.find(t => t.name === "watch")?.inputSchema.properties.condition);
+  assert.ok(tools.find(t => t.name === "send")?.inputSchema.required?.includes("caller"));
   const overview = await call("tools/call", { name: "overview", arguments: { config: f.configPath, env: "local" } });
   assert.ok(!overview.result.isError, JSON.stringify(overview));
   assert.ok(JSON.stringify(overview.result).includes("local:t1"));
@@ -58,6 +59,15 @@ test("stdio MCP advertises schemas and runs the same read and write commands", {
   const read = await call("tools/call", { name: "read", arguments: { config: f.configPath, thread: f.commands[0]!.threadId } });
   assert.ok(!read.result.isError, JSON.stringify(read));
   assert.ok(JSON.stringify(read.result).includes("Review this task"));
+  const missingCaller = await call("tools/call", { name: "send", arguments: { config: f.configPath, thread: f.commands[0]!.threadId, prompt: "Check the tests." } });
+  assert.equal(missingCaller.result.isError, true);
+  assert.equal(f.commands.length, 1);
+  const sent = await call("tools/call", { name: "send", arguments: { config: f.configPath, thread: f.commands[0]!.threadId, caller: "local:t1", prompt: "Check the tests." } });
+  assert.ok(!sent.result.isError, JSON.stringify(sent));
+  assert.equal(f.commands.length, 2);
+  assert.match(f.commands[1]!.message.text, /Sender thread: local:t1/);
+  assert.match(f.commands[1]!.message.text, /from another agent, not the user/);
+  assert.ok(f.commands[1]!.message.text.endsWith("\n\nCheck the tests."));
   const invalid = await call("tools/call", { name: "read", arguments: { config: f.configPath, thread: "t1", turns: 0 } });
   assert.equal(invalid.result.isError, true);
   assert.ok(!stderr.includes("test-secret"));

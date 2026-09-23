@@ -49,9 +49,15 @@ explicit `--provider INSTANCE --model MODEL` appropriate to the user's request;
 do not silently switch providers. New threads default to approval-required.
 Set a different permission mode only when the work is authorized for it.
 
-Use `send ENV:THREAD_ID --prompt TEXT` for an idle thread. It keeps that thread's
-model, permission, and interaction settings. In MCP, supply the `prompt` input;
-stdin carries MCP protocol messages.
+Use `send ENV:THREAD_ID --caller ENV:CALLER_ID --prompt TEXT` for an idle thread.
+Caller is required: resolve your own T3 thread with `list` using the current
+worktree, not a provider conversation ID. Bare caller IDs mean local regardless
+of the recipient's `--env`. Send prefixes the prompt with your thread title,
+reference, environment ID, and reply target, marking it as an agent message.
+To reply, send to that target with your own thread as caller; for direct-only
+connections, map the sender environment ID to your configured environment alias.
+Send keeps the recipient's model, permission, and interaction settings. In MCP,
+supply `caller` and `prompt`; stdin carries MCP protocol messages.
 
 `accepted` is a dispatch receipt, not task completion. Read the thread's
 `latestTurn`, `session`, and messages to check progress and failures. If a write fails, inspect its
