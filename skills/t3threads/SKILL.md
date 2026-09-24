@@ -44,10 +44,22 @@ the task. Worktree setup runs unless `--skip-setup` is set. The default base is
 the local branch; `--from-origin` requests the remote base. Remote worktrees need
 `--branch BASE`. Missing projects must be added in T3 first.
 
-Start uses the project's saved model and options. If none is saved, use an
-explicit `--provider INSTANCE --model MODEL` appropriate to the user's request;
-do not silently switch providers. New threads default to approval-required.
-Set a different permission mode only when the work is authorized for it.
+Start inherits the destination project's model setting, then its machine's
+default, preserving the provider instance and model options. Omit provider/model
+overrides unless the user requests them. `--model MODEL` keeps the inherited
+provider; changing the model clears its old options. `--provider INSTANCE`
+requires `--model MODEL`. A disabled or missing project provider falls back to
+the machine model, as in T3. An explicitly cleared project model is not a request
+to choose one; report the missing default or use a user-requested override.
+Do not copy the caller's model. Omit `permission` to inherit T3's setting for
+the destination project, then the destination machine's default. This works for
+local, direct, and T3 Connect environments; do not copy the caller's permissions
+or hardcode a default. Only pass an explicit mode when the user requests an
+override: `approval-required`, `auto-accept-edits`, `auto`, or `full-access` via
+`--permission` (CLI) or `permission` (MCP). If T3 cannot supply a supported
+setting, report the error rather than guessing a mode. Check
+`command.runtimeMode` and `command.bootstrap.createThread.runtimeMode` in the
+dry run. `mode: "plan"` controls interaction mode, not permissions.
 
 Use `send ENV:THREAD_ID --caller ENV:CALLER_ID --prompt TEXT` for an idle thread.
 Add `--steer` to send immediately during a turn (or start a turn if idle).
@@ -104,3 +116,16 @@ sign-in exists. Connect reuses T3's native macOS credential cache and Keychain
 read-only, with no separate login. Windows/Linux encrypted desktop credentials
 are not supported yet; named direct sessions work there. Do not manually copy
 cloud credentials or read/edit T3's database to work around an error.
+
+Before setup commands, explain the README's "Data access and macOS prompts"
+section to the user: T3 runtime metadata and saved sign-in are read, thread data
+comes through T3's APIs, and t3threads stores its own thread cache and connection
+credentials locally. Explain when thread text goes to their agent/model provider
+or optional TypeSafe features. On macOS, warn about possible app-data permission
+dialogs, `security` requesting T3's Safe Storage Keychain item for Connect, and
+the background-item notice when installing the service. Explain the purpose and
+expected requester before triggering a prompt; let the user handle the dialog.
+Never request passwords or tokens in chat. If access is denied or times out,
+report the affected feature and retry the check after the user resolves it.
+During setup, explain that delegated threads follow the destination project's
+and machine's T3 model and permission settings unless the user requests overrides.

@@ -22,6 +22,53 @@ can check for overlapping work, hand off tasks, and wait for each other.
 t3threads uses your existing T3 sign-in. You do not need another account or a
 modified T3.
 
+## Let your agent set it up
+
+Copy this prompt into your coding agent in T3:
+
+```text
+Set up t3threads so my agents can find related work and coordinate T3 threads.
+Read https://github.com/attunehq/t3threads/blob/main/README.md and follow its
+current setup instructions for my platform.
+
+Before running setup commands, explain the README's "Data access and macOS
+prompts" section: what T3 data is read, what is stored locally, and when thread
+text goes to a model provider. Warn me before commands that may trigger macOS
+app-data access, T3 Safe Storage Keychain prompts, or a background-item notice.
+Explain the expected requester and purpose, and let me handle system dialogs.
+Never ask me to paste my Mac password or credentials into the chat.
+
+1. Check the prerequisites, install or update t3threads globally, and run
+   `t3threads doctor`. Fix setup issues you can resolve; tell me if I need to
+   open T3 or sign in through the desktop app.
+2. Register the t3threads MCP server with the provider CLIs I use in T3. Check
+   for custom provider home directories and configure those actual homes.
+   Preserve existing configuration and avoid duplicate registrations.
+3. Install the t3threads agent skill where those providers will discover it.
+   Add a short note to their persistent agent instructions to use t3threads
+   when related threads may contain useful context, to check for overlapping
+   work, and when I ask to delegate or follow up in another T3 thread. Follow
+   the skill's guidance for handoffs and completion notifications.
+   Instruct agents to omit model and permission overrides so new threads use
+   the destination project's T3 settings, then that machine's defaults. Only
+   pass explicit overrides when I request them.
+4. On macOS, install and check the background service so queued messages and
+   watcher notifications keep working after login. On other platforms, explain
+   how to run `t3threads watch-run` under a service manager.
+5. Verify access with `t3threads environments` and `t3threads overview`. Report
+   unreachable machines or other gaps. Leave optional Jev/TypeSafe setup alone
+   unless I ask for it.
+6. Summarize what you configured and any remaining steps. Tell me how to start
+   a fresh agent session and verify it can see the skill and call the t3threads
+   overview tool. Do not call setup complete based on `doctor` alone.
+```
+
+Installing the CLI does not give your agents MCP access or instructions to use
+it. Start a new thread after setup, then try: "Use t3threads to show me my open
+threads and find any work related to this project." You can explicitly ask it
+to delegate with "Start a new T3 thread for ..."; installation alone does not
+make agents delegate automatically.
+
 ## Requirements
 
 - Node.js 22.16 or later.
@@ -44,6 +91,50 @@ Some features work only on macOS for now:
 - The [background service](#keep-delivery-running). On Linux and Windows, run
   `t3threads watch-run` under your own service manager.
 - Storing the TypeSafe key in the Keychain. Use `TYPESAFE_API_KEY` instead.
+
+## Data access and macOS prompts
+
+t3threads needs access to T3's local connection information and, for T3 Connect,
+your saved sign-in. Here is what it uses:
+
+| Data | Why t3threads needs it |
+| --- | --- |
+| T3's runtime metadata in `~/.t3/userdata/server-runtime.json` | Find the running local server. It then uses T3's CLI to issue a temporary session. |
+| T3's saved sign-in in `~/.t3/userdata/clerk-tokens.json` and its macOS Safe Storage Keychain item | Unlock the existing sign-in and authenticate with T3's sign-in provider and Connect relay to reach your linked machines. |
+| Project metadata, thread messages and status, and model settings | Read and coordinate your work through T3's HTTP and WebSocket APIs. t3threads never opens T3's database or changes its credential files. |
+| Its own [local state directory](#your-data) | Store cached thread text, model results, queued messages, watchers, and per-machine connection credentials and keys. |
+
+The T3 paths above use the default home; custom T3 homes use their corresponding
+files. Reading threads through MCP makes their contents available to your agent.
+`summarize`, `find`, and `text` watchers send selected thread text through the
+model provider configured in T3. Optional Jev features send text to TypeSafe.
+See [Models and privacy](#models-and-privacy) for details.
+
+On macOS, you may see these dialogs or notices, depending on your OS version,
+existing permissions, and how you launch the command:
+
+- **Access to data from other apps.** macOS may ask whether the app running the
+  command can access other apps' data. The requester can be your terminal or
+  agent host rather than "t3threads". Check that it matches the setup you just
+  started; t3threads needs the T3 data described above.
+- **Keychain access.** T3 Connect uses macOS's `security` helper to read a key
+  named `t3code Safe Storage`, `T3 Code (Nightly) Safe Storage`, or
+  `T3 Code Safe Storage`. A dialog may name `security` as the requester and ask
+  for your login Keychain password, usually your Mac login password. Enter it
+  only in the macOS dialog. **Allow** grants this access once; **Always Allow**
+  lets that requester access the item again without asking. If the requester is
+  `security`, this trusts the helper for that item, not just t3threads. Denying
+  access prevents t3threads from unlocking that sign-in for Connect. See Apple's
+  [Keychain access guidance](https://support.apple.com/guide/keychain-access/kyca1243/mac).
+- **Background item added.** Installing the optional macOS service may produce
+  a login/background-item notice. The service appears as **T3 Threads** in
+  System Settings under General > Login Items & Extensions (the name varies by
+  macOS version). It keeps queued messages and watcher notifications moving.
+  See [Keep delivery running](#keep-delivery-running).
+
+Your setup agent should explain these before triggering them and leave the
+dialogs to you. If access is denied or times out, resolve the relevant permission
+and rerun the failed check. Do not paste passwords or tokens into the agent chat.
 
 ## Install
 
@@ -171,12 +262,33 @@ do (for example, push or open PRs).
   `--skip-setup` to skip the project's setup script. On a remote machine, also
   pass `--branch BASE`.
 - `--checkout current` works in the project's existing checkout.
-- The thread uses the project's saved model. If the project has none, pass
-  `--provider INSTANCE --model MODEL`.
-- New threads ask for approval before they act. Use `--permission` to change
-  this, and `--mode plan` to start in plan mode.
+- The thread inherits the destination project's model setting, then that
+  machine's default, including the provider instance and model options. A
+  project override with a disabled or missing provider falls back to the
+  machine model, as in T3. Clearing the project default explicitly means no
+  default model; choose one in T3 or pass `--provider INSTANCE --model MODEL`.
+- `--model MODEL` overrides the model within the inherited provider. Changing
+  the model clears inherited model options; keeping the same model preserves
+  them. `--provider INSTANCE --model MODEL` selects both explicitly.
+- New threads inherit T3's permission setting for the destination project on
+  the destination machine. If the project has no override, they use that
+  machine's default. This applies to local, direct, and T3 Connect environments;
+  settings on the calling machine or parent thread do not override the target.
+- To override inheritance, pass `--permission approval-required`,
+  `--permission auto-accept-edits`, `--permission auto`, or
+  `--permission full-access`. MCP uses the same values in `permission`; omit
+  that field to inherit. Check `runtimeMode` in the `--dry-run` output.
+- Use `--mode plan` to start in plan mode; interaction mode is separate from
+  permissions.
 
 The project must already exist in T3.
+
+T3's settings for all projects or all machines are respected through the values
+saved on each destination. For example, a project's Auto override on your
+workstation wins over that workstation's Supervise default; the same project
+on your laptop uses the laptop's own settings. t3threads reads settings on each
+start. If T3 cannot supply a supported permission setting, the command fails
+before creating a thread; fix the setting or pass `--permission` explicitly.
 
 A result of `accepted` means that T3 received the task, not that the task is
 done. Use `read` or a [watcher](#get-notified-when-threads-finish) to follow it.
