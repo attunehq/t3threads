@@ -56,12 +56,8 @@ flags are mutually exclusive; MCP uses `steer: true` or `enqueue: true`.
 Enqueue returns `status: queued` and a `queueId`. Use `queued` to inspect
 delivery or errors and `unqueue QUEUE_ID` to cancel before dispatch begins.
 The local background worker delivers in order per recipient and retries
-offline environments. On macOS, `service install` enables automatic startup at
-login and recovery after crashes; `service status` reports its state. An
-installed service handles restarts without manual `watch-run` commands and
-automatically adopts npm/Volta package upgrades at its installed location.
-`service start` restores an unloaded service; `service restart` explicitly
-reloads it while preserving the installed configuration.
+offline environments. On macOS, `service status` reports whether the background
+service keeps delivery running across logins and crashes.
 Do not create a retry loop or resend a message already in the durable queue.
 Caller is required: resolve your own T3 thread with `list` using the current
 worktree, not a provider conversation ID. Bare caller IDs mean local regardless

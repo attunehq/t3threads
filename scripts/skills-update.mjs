@@ -1,4 +1,4 @@
-// Adapted from attunehq/sorted: cache selected contributor packs across worktrees.
+// Cache selected contributor packs across worktrees.
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, cp, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
