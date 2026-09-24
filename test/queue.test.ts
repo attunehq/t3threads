@@ -141,15 +141,19 @@ test("queued delivery resolves a remote recipient independently of the local wor
 });
 
 test("CLI enqueue outlives the sending process, exposes status, and supports cancellation and dry run", { timeout: 20_000 }, async t => {
-  let state: State | undefined;
+  let state: State | undefined, workerPid: number | undefined;
   t.after(async () => {
-    const pid = state?.get<{ pid: number }>("worker", "lease")?.pid;
+    const leasePid = state?.get<{ pid: number }>("worker", "lease")?.pid;
+    // A drained worker releases its lease before exiting and can still reopen the database.
+    const pid = workerPid ?? leasePid;
     if (!pid) return;
     const running = () => {
       try { process.kill(pid, 0); return true; }
       catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return false; throw error; }
     };
-    try { process.kill(pid, "SIGTERM"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+    if (leasePid === pid) {
+      try { process.kill(pid, "SIGTERM"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+    }
     const deadline = Date.now() + 5000;
     while (running() && Date.now() < deadline) await delay(50);
     assert.equal(running(), false, "the detached worker must exit before its files are removed");
@@ -170,8 +174,12 @@ test("CLI enqueue outlives the sending process, exposes status, and supports can
   assert.equal(f.commands.length, 0);
   assert.equal((await cli("unqueue", second.queueId)).status, "cancelled");
   assert.equal((await cli("queued")).messages.length, 2);
+  // The recipient is busy, so the worker keeps its lease until delivery.
+  let deadline = Date.now() + 5000;
+  while (!(workerPid = state.get<{ pid: number }>("worker", "lease")?.pid) && Date.now() < deadline) await delay(50);
+  assert.ok(workerPid, "enqueue starts a detached worker");
   f.stored.get("t1")!.latestTurn = { state: "completed" };
-  const deadline = Date.now() + 12000;
+  deadline = Date.now() + 12000;
   while (state.get<QueuedMessage>("message", first.queueId)?.status !== "accepted" && Date.now() < deadline) await delay(50);
   assert.equal(state.get<QueuedMessage>("message", first.queueId)?.status, "accepted");
   assert.equal(f.commands.length, 1);
