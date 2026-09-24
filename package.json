@@ -21,6 +21,7 @@
   "files": [
     "dist",
     "skills",
+    "scripts/postinstall.mjs",
     "README.md",
     "LICENSE"
   ],
@@ -30,10 +31,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test test/*.test.ts",
+    "test": "node --import tsx --test test/*.test.ts test/*.test.mjs",
     "test:package": "node scripts/test-package.mjs",
     "check": "npm run typecheck && npm test && npm run build",
     "prepack": "npm run build",
+    "postinstall": "node scripts/postinstall.mjs",
+    "skills:update": "node scripts/skills-update.mjs",
     "dev": "node --import tsx src/bin.ts"
   },
   "dependencies": {

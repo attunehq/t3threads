@@ -414,6 +414,23 @@ registrations, and undelivered messages.
 
 ## Development
 
+`npm ci` installs shared contributor skills for Codex (`.agents/skills`) and
+Claude Code (`.claude/skills`). Like Sorted, postinstall reuses a cache in the
+shared Git directory across worktrees. Run `npm run skills:update` to refresh
+from upstream using the pinned `skills@1.5.22` installer.
+
+The selected skills are `babysit`, `code-craft`, `gh-stack`, `merge-open-prs`,
+`resolve-pr-conflicts`, `ship-it`, `tag-release`, and `testing-craft` from
+`jssblck/agents`, plus `typesafe-ai` from `typesafe-ai/skills`. Platform and UI
+skills are not installed. Downloads and `skills-lock.json` are ignored by Git;
+the lock records upstream content but does not pin it. Tracked skills are
+protected from replacement.
+
+Skill setup is best effort: a failed download reports how to retry without
+failing dependency installation. CI and published npm installs skip it.
+Set `T3THREADS_SKIP_POSTINSTALL=1` to skip it in a checkout. The bundled
+`skills/t3threads` skill for CLI users is separate from these contributor skills.
+
 ```sh
 npm ci
 npm run check
@@ -437,6 +454,7 @@ dispatch route does not perform that bootstrap.
 CI tests Node 22 and 24 on macOS, Linux, and Windows. It also installs the packed
 tarball into a temporary global prefix and checks the CLI and stdio MCP startup
 outside the checkout, without install scripts or development dependencies.
+It then verifies that the published postinstall hook runs without installing skills.
 Run this check locally with `npm pack && npm run test:package`.
 
 ### Releases
