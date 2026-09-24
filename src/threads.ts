@@ -188,11 +188,16 @@ export function startCommand(project: Project, options: { prompt: string; title?
 
 export const busy = (t: Thread) => Boolean(t.session?.activeTurnId || ["starting", "running"].includes(t.session?.status ?? "") || t.latestTurn?.state === "running");
 
-export function sendCommand(thread: Thread, prompt: string, sender?: { ref: string; title: string; environmentId: string; replyRef: string }, delivery: "idle" | "steer" = "idle") {
+export function sendCommand(thread: Thread, prompt: string, sender?: { ref: string; title: string; environmentId: string; replyRef: string } | { externalCaller: string }, delivery: "idle" | "steer" = "idle") {
   if (thread.deletedAt || thread.archivedAt) fail("THREAD_INACTIVE", "Restore this thread in T3 before sending a prompt.");
   // T3 routes thread.turn.start to the running provider as steering input.
   if (delivery === "idle" && busy(thread)) fail("THREAD_BUSY", "The thread is running. Use --steer to send now or --enqueue to wait until it is idle.");
-  if (sender) prompt = `[t3threads agent message]
+  if (sender && "externalCaller" in sender) prompt = `[t3threads external message]
+From: external caller ${JSON.stringify(sender.externalCaller)}
+This message was relayed by an external integration, not a T3 thread. The caller name is supplied by the integration, not a verified user identity. Source context and reply instructions follow below.
+
+${prompt}`;
+  else if (sender) prompt = `[t3threads agent message]
 From: agent in T3 thread ${JSON.stringify(sender.title)}
 Sender thread: ${sender.ref}
 Sender environment ID: ${sender.environmentId}

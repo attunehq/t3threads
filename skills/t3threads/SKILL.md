@@ -71,7 +71,7 @@ The local background worker delivers in order per recipient and retries
 offline environments. On macOS, `service status` reports whether the background
 service keeps delivery running across logins and crashes.
 Do not create a retry loop or resend a message already in the durable queue.
-Caller is required: resolve your own T3 thread with `list` using the current
+For a T3 caller, resolve your own thread with `list` using the current
 worktree, not a provider conversation ID. Bare caller IDs mean local regardless
 of the recipient's `--env`. Send prefixes the prompt with your thread title,
 reference, environment ID, and reply target, marking it as an agent message.
@@ -79,6 +79,13 @@ To reply, send to that target with your own thread as caller; for direct-only
 connections, map the sender environment ID to your configured environment alias.
 Send keeps the recipient's model, permission, and interaction settings. In MCP,
 supply `caller` and `prompt`; stdin carries MCP protocol messages.
+
+An integration outside T3 must use `--external-caller NAME` (`externalCaller`
+in MCP) instead of `--caller`. Exactly one caller option is required. Include
+the original request, source link, and reply instructions in the prompt. The
+external name is self-reported attribution, not verified user identity. Do not
+borrow another thread's identity. External sends support steer, enqueue, and
+dry-run with the same recipient settings and delivery semantics.
 
 `accepted` is a dispatch receipt, not task completion. Read the thread's
 `latestTurn`, `session`, and messages to check progress and failures. If a write fails, inspect its
