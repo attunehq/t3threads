@@ -74,6 +74,22 @@ Reads use T3's HTTP shell and per-thread snapshots. Writes use
 T3's thread and worktree bootstrap; the HTTP dispatch route does not, so do not
 use it for writes.
 
+New-thread model and permissions share one `server.getSettings` snapshot from
+the destination API. `projectSettingsOverrides[projectId]` overrides the machine's
+`defaultModelSelection` and `defaultRuntimeMode`, matching T3's
+`resolveProjectSettings`. Explicit CLI options override the corresponding
+values; fully explicit model/provider and permission skip the settings lookup.
+Missing or invalid effective settings fail before dispatch. Do not substitute
+the caller's settings or read T3's settings files. T3's cross-machine settings
+controls persist values to each selected server; the destination is authoritative.
+
+Before `projectSettingsFolded` is true, a legacy project model sits above the
+machine default and below the current project overrides. After folding, ignore
+that field so stale catalog data cannot undo a reset. An explicit null project
+model clears the default. A disabled project model provider falls back to the
+machine model. Preserve all options on an inherited selection; a different
+explicit model starts without the previous model's options.
+
 ### Local authentication
 
 On macOS, t3threads finds the `t3` executable inside T3's desktop app. Elsewhere

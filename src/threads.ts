@@ -2,6 +2,8 @@ import { resolve, relative, isAbsolute } from "node:path";
 import { Api, fail, object, run } from "./client.js";
 
 export type Model = { instanceId: string; model: string; options?: unknown };
+export const permissionModes = ["approval-required", "auto-accept-edits", "auto", "full-access"] as const;
+export type PermissionMode = typeof permissionModes[number];
 export type Project = { id: string; title: string; workspaceRoot: string; defaultModelSelection: Model | null; deletedAt?: string | null };
 export type Thread = {
   id: string; projectId: string; title: string; updatedAt: string; archivedAt?: string | null; deletedAt?: string | null; settledAt?: string | null;
@@ -98,12 +100,69 @@ export async function search(api: Api, threads: Thread[], query: string, limit: 
   return { matches, complete: true, scannedThreads, totalThreads: threads.length };
 }
 
-export function selection(project: Project, provider?: string, model?: string): Model {
-  const saved = project.defaultModelSelection;
+function modelValue(value: unknown): Model {
+  const saved = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  if ([saved.instanceId, saved.model].some(value => typeof value !== "string" || !value.trim())) {
+    fail("MODEL_REQUIRED", "T3 has no default model usable for this project. Set it in T3, or supply --provider and --model.");
+  }
+  return saved as Model;
+}
+
+function modelProviderEnabled(settings: Record<string, unknown>, instanceId: string) {
+  const instances = object(settings.providerInstances ?? {});
+  if (!Object.hasOwn(instances, instanceId)) return object(object(settings.providers ?? {})[instanceId] ?? {}).enabled === true;
+  const provider = object(instances[instanceId]);
+  const config = provider.config && typeof provider.config === "object" && !Array.isArray(provider.config) ? provider.config as Record<string, unknown> : {};
+  const configEnabled = typeof config.enabled === "boolean" ? config.enabled : undefined;
+  if (provider.enabled === false || configEnabled === false) return false;
+  // T3's resolveProviderInstanceEnabled uses these driver defaults when both flags are absent.
+  return provider.enabled ?? configEnabled ?? !["cursor", "grok", "opencode", "antigravity"].includes(String(provider.driver));
+}
+
+export function selection(project: Project, provider?: string, model?: string, settings?: Record<string, unknown>): Model {
   if (provider && !model) fail("MODEL_REQUIRED", "Pass --model when overriding --provider.");
   if (provider && model) return { instanceId: provider, model };
-  if (!saved?.instanceId || !saved.model) fail("MODEL_REQUIRED", "Project has no default model. Set it in T3, or supply --provider and --model.");
+  let value: unknown = project.defaultModelSelection;
+  if (settings) {
+    const overrides = projectOverrides(settings, project.id, "MODEL_REQUIRED");
+    // A completed fold makes the settings map authoritative, including resets.
+    const projectValue = Object.hasOwn(overrides, "defaultModelSelection") ? overrides.defaultModelSelection
+      : settings.projectSettingsFolded !== true && project.defaultModelSelection != null ? project.defaultModelSelection : undefined;
+    value = settings.defaultModelSelection;
+    if (projectValue !== undefined) {
+      const candidate = modelValue(projectValue);
+      if (modelProviderEnabled(settings, candidate.instanceId)) value = candidate;
+    }
+  }
+  const saved = modelValue(value);
+  if (settings && !modelProviderEnabled(settings, saved.instanceId)) fail("MODEL_DISABLED", "T3's default model provider is disabled or unavailable. Set an enabled default in T3, or supply --provider and --model.");
   return model && model !== saved.model ? { instanceId: saved.instanceId, model } : saved;
+}
+
+function projectOverrides(settings: Record<string, unknown>, projectId: string, code: string): Record<string, unknown> {
+  const record = (value: unknown): Record<string, unknown> => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) fail(code, "T3 returned invalid project settings. Fix the settings or pass --permission, --provider and --model explicitly.");
+    return value as Record<string, unknown>;
+  };
+  const overrides = settings.projectSettingsOverrides === undefined ? {} : record(settings.projectSettingsOverrides);
+  return Object.hasOwn(overrides, projectId) ? record(overrides[projectId]) : {};
+}
+
+export function permissionSelection(settings: Record<string, unknown>, projectId: string, override?: PermissionMode): PermissionMode {
+  if (override !== undefined) return override;
+  const invalid = () => fail("PERMISSION_REQUIRED", "T3 did not return a supported default permission for this project. Set it in T3 or pass --permission explicitly.");
+  const project = projectOverrides(settings, projectId, "PERMISSION_REQUIRED");
+  // Match T3's resolveProjectSettings on the destination server, not the caller.
+  const mode = project.defaultRuntimeMode === undefined ? settings.defaultRuntimeMode : project.defaultRuntimeMode;
+  if (!permissionModes.includes(mode as PermissionMode)) return invalid();
+  return mode as PermissionMode;
+}
+
+export async function startSelections(api: Api, project: Project, options: { provider?: string; model?: string; permission?: PermissionMode }) {
+  const explicitModel = options.provider ? selection(project, options.provider, options.model) : undefined;
+  const settings = !explicitModel || options.permission === undefined ? object(await api.rpc("server.getSettings", {})) : {};
+  const permission = permissionSelection(settings, project.id, options.permission);
+  return { permission, model: explicitModel ?? selection(project, undefined, options.model, settings) };
 }
 
 export async function localBranch(project: Project) {
