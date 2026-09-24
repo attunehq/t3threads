@@ -1,192 +1,74 @@
 # t3threads
 
-Discover, search, summarize, classify, watch, and manage
-[T3 Code](https://github.com/pingdotgg/t3code) conversations across machines from
-a CLI, MCP server, or Fetch API. No T3 fork or separate Connect login required.
+See and coordinate all of your [T3 Code](https://github.com/pingdotgg/t3code)
+threads, on every machine, from one place.
 
-The commands are defined once with [incur](https://github.com/wevm/incur).
-The installed package runs on Node.js 22.16+; it does not require Bun, a compiler,
-or a second copy of T3. T3 Code must be running on the target machine.
+When you run many agent threads across a laptop, a workstation, and a remote
+box, simple questions get hard to answer. What is running right now? Is another
+thread already changing this code? Did that task finish? t3threads answers them
+from your terminal. It also gives your agents the same tools over MCP, so they
+can check for overlapping work, hand off tasks, and wait for each other.
+
+- **One view across machines.** List, search, and read threads on every machine
+  linked to your T3 account.
+- **Find overlapping work.** Describe a change in plain language and get the
+  threads that touch it.
+- **Catch up quickly.** Summarize a long thread instead of scrolling through it.
+- **Hand off and follow up.** Start a new thread with a task, or message an
+  existing one now or when it becomes idle.
+- **Get notified.** Wake a thread when other threads finish, fail, or reach a
+  point you describe.
+
+t3threads uses your existing T3 sign-in. You do not need another account or a
+modified T3.
+
+## Requirements
+
+- Node.js 22.16 or later.
+- T3 Code 0.0.42 or later, running on each machine you want to reach. You can
+  close the T3 window, but the T3 server must keep running.
+- To reach your other machines automatically, sign in to T3 Connect in the T3
+  desktop app.
+
+### Platform support
+
+t3threads is primarily tested on macOS. Linux and Windows support is unproven,
+but should work. If something breaks,
+[open an issue](https://github.com/attunehq/t3threads/issues).
+
+Some features work only on macOS for now:
+
+- Automatic access to your other machines through T3 Connect. On Linux and
+  Windows, add remote machines yourself (see
+  [Connect other machines](#connect-other-machines)).
+- The [background service](#keep-delivery-running). On Linux and Windows, run
+  `t3threads watch-run` under your own service manager.
+- Storing the TypeSafe key in the Keychain. Use `TYPESAFE_API_KEY` instead.
 
 ## Install
-
-Install with Node.js 22.16 or newer:
 
 ```sh
 npm install --global t3threads
 t3threads doctor
 ```
 
-Update an installed copy to the latest npm release:
+`doctor` confirms that t3threads can reach T3 and shows the model it will use for
+summaries.
+
+To update, run `t3threads update`. Then restart your agents' sessions so they load
+the new version.
+
+## Give your agents access
+
+Most of the value comes from the agents inside T3 using t3threads. Register the
+MCP server with the provider CLIs that T3 launches:
 
 ```sh
-t3threads update
+claude mcp add --scope user t3threads -- t3threads --mcp
+codex mcp add t3threads -- t3threads --mcp
 ```
 
-This runs `npm install --global t3threads@latest` using npm on your PATH and its
-configured registry and global prefix. npm must be installed and the prefix must
-be writable. Restart running MCP servers to use the updated version.
-An installed background service automatically reloads package upgrades at its
-installed location.
-
-From a checkout:
-
-```sh
-npm ci
-npm run check
-npm link
-t3threads doctor
-```
-
-To distribute an npm tarball:
-
-```sh
-npm pack
-npm install --global ./t3threads-0.3.0.tgz
-```
-
-`npm pack --dry-run` shows exactly what ships. Runtime code is compiled JavaScript;
-TypeScript, tests, and the development WebSocket server dependency are not shipped.
-
-## CLI
-
-Start with a cheap inventory, then narrow the work you want to inspect:
-
-```sh
-t3threads overview                         # all configured machines; no model calls
-t3threads find 'work that overlaps with changing the billing webhook' --project Sorted
-t3threads summarize local:THREAD_ID
-t3threads list --env all
-t3threads search 'billing webhook' --env all
-```
-
-`overview` and `find` default to all environments and exclude settled threads.
-Use `--include-settled` to include those. `list`, `projects`, and literal `search`
-default to local; `--env all` aggregates them. Aggregated results include
-`results`, `errors`, and `complete`. Each thread reference contains its owning
-environment. A linked local host is deduplicated by environment ID. An offline
-host or failed thread read makes coverage incomplete, never an empty success.
-
-`find` batches relevance decisions over recent thread text, with up to 100
-threads per machine by default (`--max-threads`). It reads the latest eight user
-turns (`--turns`), retains at most 12,000 characters per thread, and reports its
-coverage. This is a recent-work scan; use literal `search` or paginated `read`
-for exhaustive history. Relevance decisions and summaries are cached by content,
-query, and model. Repeating an unchanged scan does not invoke the model again.
-
-Summaries and relevance use the running local T3 server's saved
-`textGenerationModelSelection` and provider instance. `--model-env NAME` selects
-another local T3 home. The adapter currently supports Codex and Claude, invoking
-their CLI with the selected model in a temporary directory with executable
-tools/MCP/hooks disabled. T3 has no general-purpose summary RPC, so this small
-adapter is the one model operation implemented outside T3. Unsupported providers
-and custom launch arguments fail explicitly. It does not create a coding thread
-to generate a summary. Model judgments are evidence to inspect, not proof of
-test results or PR readiness.
-
-```sh
-t3threads projects
-t3threads list --project /path/to/project
-t3threads search "billing decision" --project PROJECT_ID
-t3threads read local:THREAD_ID
-t3threads read local:THREAD_ID --before CURSOR
-t3threads read local:THREAD_ID --all --json
-```
-
-Project selectors accept an ID, exact title, or workspace path. Duplicate titles
-require an ID. List/search exclude archived threads unless `--archived` is set.
-Read returns the latest 20 user turns and a cursor for older history; `--turns N`
-changes the window. Search scans titles and message text across history, newest
-threads first. It stops at `--limit N` matches (default 20) and reports
-`complete: false` when it stops early. Attachments and tool activity are not searched.
-
-Outputs use incur's compact format by default. Use `--json` for JSON,
-`--full-output` for the success/error envelope, and `--schema` or `--llms` for
-machine-readable command discovery. Invalid input and failed operations exit nonzero.
-
-### Start and continue work
-
-```sh
-t3threads start --project PROJECT_ID --checkout worktree \
-  --prompt-file /tmp/task.txt --dry-run
-
-t3threads start --project PROJECT_ID --checkout worktree \
-  --prompt-file /tmp/task.txt
-
-t3threads send local:THREAD_ID --caller local:CALLER_ID --prompt 'Continue with the tests.'
-
-t3threads send local:THREAD_ID --caller local:CALLER_ID --steer \
-  --prompt '1Password is available. Continue where you left off.'
-
-t3threads send local:THREAD_ID --caller local:CALLER_ID --enqueue \
-  --prompt 'When this turn finishes, run the integration tests.'
-
-t3threads queued
-t3threads unqueue QUEUE_ID
-```
-
-Use `--checkout current` to work in the project's existing checkout. Each worktree
-gets its own `t3threads/<thread-id>` branch, starting from the local base unless
-`--from-origin` is set. T3's setup script
-runs unless `--skip-setup` is set. For a remote worktree, provide `--branch BASE`.
-Projects must already exist in T3; the CLI does not silently add one.
-
-Start preserves the project's saved model and provider options. If no default is
-saved, specify `--provider INSTANCE --model MODEL`. Changing providers requires
-both flags. New threads default to `--permission approval-required` and
-`--mode default`; `--mode plan` starts a planning thread. Send preserves the
-thread's settings. Plain send rejects busy threads; all delivery modes reject
-deleted or archived threads.
-
-`--steer` sends immediately through T3's native turn command. T3 passes the
-message to the running provider; if the thread is idle, it starts a new turn.
-The provider controls when mid-turn input takes effect. `--enqueue` persists
-the message locally and returns `status: queued` with a `queueId`. The detached
-worker waits until the recipient is idle, checking about every five seconds,
-then dispatches using the recipient's current settings. These flags are mutually
-exclusive. MCP and Fetch callers use `steer: true` or `enqueue: true`.
-
-Queued follow-ups survive the sending process and worker restarts. Delivery
-attempts follow enqueue order per recipient, including environment aliases.
-Offline environments are retried; deleted, archived, missing, changed, or
-server-rejected recipients produce a visible `failed` entry. Use `queued` to
-inspect pending, dispatching, accepted, cancelled, and failed entries.
-`unqueue QUEUE_ID` cancels a pending entry; dispatch cannot be recalled once it
-starts. The worker persists a stable command ID before dispatch and reuses it
-for T3 receipt deduplication after a crash or lost response.
-
-The enqueueing machine must remain running for delivery. On macOS, install the
-background service once with `t3threads service install` to resume delivery
-automatically at login and after worker crashes. This is t3threads' durable queue, separate from T3's UI
-queue. The idle check and dispatch are separate operations, so another client
-can start a turn between them. `--dry-run --enqueue` previews the attributed
-message without storing it or starting a worker; settings are refreshed at
-delivery.
-
-Send requires `--caller ENV:THREAD_ID` (`caller` in MCP/API) to identify the
-sending agent's T3 thread. Resolve it with `list` using the agent's current
-worktree; provider conversation IDs are different. Bare caller IDs mean local,
-independently of the recipient's `--env`. Existing send scripts must add caller.
-Messages include the sender's thread title, reference, environment ID, and reply
-target, explicitly identifying them as agent messages rather than user messages.
-Reply targets use `local` on the same environment and `connect-ENV_ID` across
-machines; direct-only setups must map that environment ID to a configured alias.
-`--dry-run` includes the complete attributed message.
-
-A new thread does not inherit the calling conversation. Include the task,
-necessary context, completion criteria, and action limits in its prompt.
-`status: accepted` means dispatch succeeded, not that the agent finished.
-Use `read` to check `latestTurn`, `session`, and replies, or register a watcher
-below. A failed write reports thread and
-command IDs; inspect the thread before retrying to avoid duplicate work.
-
-## MCP
-
-```sh
-t3threads --mcp
-```
-
-Example MCP client configuration:
+For other MCP clients, run `t3threads mcp add`, or configure the server directly:
 
 ```json
 {
@@ -196,65 +78,245 @@ Example MCP client configuration:
 }
 ```
 
-For the provider CLIs that T3 launches:
+If a provider uses a custom home directory in T3, register the server in that
+home.
+
+Next, install the agent skill. It teaches agents when to consult other threads
+and how to hand off work safely:
 
 ```sh
-codex mcp add t3threads -- t3threads --mcp
-claude mcp add --scope user t3threads -- t3threads --mcp
+npx skills add attunehq/t3threads
 ```
 
-Register in the provider instance's configured home when it uses a custom home.
-Existing provider sessions may need to be restarted to discover newly installed
-MCP servers. `doctor` checks T3 access, shows the saved text-generation model,
-reports whether a Jev credential is available, and prints the watcher state path.
+Start a new thread so the agent picks up the server, then ask things like:
 
-Incur also supplies `t3threads mcp add` for client registration. The commands
-are exposed directly as typed tools. Read tools and agent-launching tools have
-distinct MCP annotations. Pass prompt text through the `prompt` input; stdin is
-reserved for the MCP transport.
+- "Is any other thread working on the billing webhook?"
+- "Summarize what the workstation thread decided about the migration."
+- "Start a worktree thread that writes tests for this module, and tell me when
+  it finishes."
 
-An optional [agent skill](skills/t3threads/SKILL.md) explains how to consult other
-threads and hand over authorized work. `t3threads skills add` can also generate
-and install command-reference skills through incur.
+## Use it from the terminal
 
-## Fetch API
+Every MCP tool is also a command. Run `t3threads COMMAND --help` for all options.
+Output is compact by default; add `--json` for JSON.
 
-```js
-import { cli } from 't3threads'
+A thread reference has the form `ENV:THREAD_ID`, for example `local:abc123` or
+`connect-ENV_ID:abc123`. Commands print these references wherever a thread
+appears.
 
-const response = await cli.fetch(new Request('http://local/projects'))
-console.log(await response.json())
+`overview` and `find` cover every machine. `projects`, `list`, and `search` cover
+only the local machine unless you pass `--env all` or `--env NAME`.
+
+### See what is going on
+
+```sh
+t3threads overview
+t3threads overview --project my-app
 ```
 
-The same handler exposes `/openapi.json` and `/mcp` (HTTP MCP). Read commands
-accept query parameters. For writes, send all options in a JSON POST body:
+`overview` lists open threads on every machine. It is fast and makes no model
+calls. If a machine is offline, the result lists it in `errors` and reports
+`complete: false`. A missing machine is never shown as having no threads.
 
-```js
-await cli.fetch(new Request('http://local/start', {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({
-    project: 'PROJECT_ID', checkout: 'worktree',
-    prompt: 'Review this change and report findings.', dryRun: true
-  })
-}))
+### Find related work
+
+```sh
+t3threads find 'work that overlaps with changing the billing webhook'
+t3threads search 'billing webhook' --env all
 ```
 
-No HTTP listener starts automatically. This handler controls the host's T3
-environments and can read prompt/config files. Keep it local, or provide your own
-authentication and access controls before exposing it to other callers.
+`find` asks a model which open threads relate to your description. It checks
+recent activity: the latest 8 user turns of up to 100 threads per machine. Use
+`--turns` and `--max-threads` to widen the scan. The result reports what it
+covered.
 
-## Environments and authentication
+`search` matches literal text in thread titles and full message history. It does
+not search attachments or tool output.
 
-Local discovery reads `T3CODE_HOME` or `~/.t3`. Use `--home PATH` for another local
-data directory. On macOS, the CLI finds the matching executable inside T3's
-desktop app. Elsewhere it uses `t3` on PATH. It verifies an exact version match
-before calling T3's own `auth session issue` command, keeps the temporary bearer
-in memory, and revokes it in `finally`. It never opens T3's SQLite database.
-A forced process kill can leave a session until its one-hour expiry.
+`overview` and `find` skip settled threads unless you add `--include-settled`.
+`list` and `search` skip archived threads unless you add `--archived`.
 
-Optional configuration: `$XDG_CONFIG_HOME/t3threads/config.json`, or
-`~/.config/t3threads/config.json` when that variable is unset:
+### Read and summarize a thread
+
+```sh
+t3threads projects
+t3threads list --project ~/code/my-app
+t3threads summarize local:THREAD_ID
+t3threads read local:THREAD_ID
+t3threads read local:THREAD_ID --all
+```
+
+You can select a project by its ID, exact title, or workspace path. `read` shows
+the latest 20 user turns and a cursor. Pass the cursor to `--before` for older
+history, or use `--all` for the complete conversation.
+
+Summaries and `find` results come from a model. Treat them as leads to check,
+not as proof that tests passed or a PR is ready.
+
+### Start a new thread
+
+```sh
+t3threads start --project my-app --checkout worktree --prompt-file task.md --dry-run
+t3threads start --project my-app --checkout worktree --prompt-file task.md
+```
+
+`--dry-run` shows what t3threads would send without starting anything.
+
+The new thread does not see your current conversation. Write a self-contained
+prompt: the task, the context it needs, what "done" means, and what it must not
+do (for example, push or open PRs).
+
+- `--checkout worktree` creates a worktree on a new `t3threads/THREAD_ID` branch,
+  based on your local branch. Add `--from-origin` to start from the remote, or
+  `--skip-setup` to skip the project's setup script. On a remote machine, also
+  pass `--branch BASE`.
+- `--checkout current` works in the project's existing checkout.
+- The thread uses the project's saved model. If the project has none, pass
+  `--provider INSTANCE --model MODEL`.
+- New threads ask for approval before they act. Use `--permission` to change
+  this, and `--mode plan` to start in plan mode.
+
+The project must already exist in T3.
+
+A result of `accepted` means that T3 received the task, not that the task is
+done. Use `read` or a [watcher](#get-notified-when-threads-finish) to follow it.
+If a start fails, check the reported thread before you try again, so that you do
+not start the same work twice.
+
+### Message another thread
+
+```sh
+t3threads send local:THREAD_ID --caller local:MY_THREAD_ID \
+  --prompt 'Continue with the tests.'
+
+t3threads send local:THREAD_ID --caller local:MY_THREAD_ID --steer \
+  --prompt '1Password is unlocked. Continue where you left off.'
+
+t3threads send local:THREAD_ID --caller local:MY_THREAD_ID --enqueue \
+  --prompt 'When this turn finishes, run the integration tests.'
+```
+
+Choose how the message arrives:
+
+- Plain `send` delivers to an idle thread. It fails if the thread is busy.
+- `--steer` delivers now. If a turn is running, the agent receives the message
+  during that turn, when its provider allows. If the thread is idle, a new turn
+  starts.
+- `--enqueue` waits until the thread is idle, then delivers. Messages to the same
+  thread arrive in the order you queued them. If the recipient's machine is
+  offline, t3threads keeps trying. If the recipient was deleted or archived, the
+  message shows as `failed`. Use `queued` to check messages and
+  `unqueue QUEUE_ID` to cancel one before it is sent.
+
+The recipient keeps its own model and settings.
+
+`--caller` is the T3 thread that sends the message. The recipient sees the
+sender's title and a reply address, marked as a message from another agent, not
+from you. Find your own thread ID with `list`. A provider's session ID is not a
+T3 thread ID.
+
+Queued messages survive restarts and crashes, and a retry after a crash does not
+deliver a message twice. The machine that queued a message must stay on until
+the message is delivered. On macOS, install the
+[background service](#keep-delivery-running) so delivery continues after you log
+in again.
+
+### Get notified when threads finish
+
+```sh
+t3threads watch --threads local:THREAD_A --threads connect-ENV_ID:THREAD_B \
+  --caller local:MY_THREAD_ID --condition all-completed
+
+t3threads watch --threads local:THREAD_A --caller local:MY_THREAD_ID \
+  --condition text --prompt 'The thread says the tests pass and gives a PR URL.'
+
+t3threads watchers
+t3threads unwatch WATCH_ID
+```
+
+When the condition matches, t3threads sends a message to the caller thread,
+which wakes it up. If the caller is busy, the message waits until it is idle. To
+record the match without waking a thread, use `--events-only` instead of
+`--caller`.
+
+| Condition | Matches when |
+| --- | --- |
+| `all-completed` | The latest turn of every watched thread succeeded. |
+| `all-idle` | No watched thread is running. |
+| `any-error` | Any watched thread reports an error. |
+| `changed` | Any watched thread changes after you create the watcher. |
+| `text` | A model decides that your `--prompt` is true. |
+| `jev` | A [Jev classifier](#jev-classifiers) decides that your `--prompt` is true, with at least `--threshold` probability (default 0.9). |
+
+A watcher fires once. It checks every 30 seconds and expires after 24 hours; change
+these with `--interval-seconds` and `--expires-in-hours`. It keeps running after
+the command or MCP session exits. The set of watched threads is fixed when you
+create the watcher. If a watched thread is unreachable, the watcher does not fire.
+`all-completed` means that the latest turns succeeded, not that the work is
+ready to merge.
+
+`text` and `jev` conditions read recent activity from the watched threads, up
+to 100,000 characters in total. For larger sets, watch fewer threads or use one
+of the status conditions.
+
+`watchers` shows each watcher's state, evidence, and errors. `unwatch` stops a
+watcher, including a notification that was not yet sent.
+
+### Manage threads
+
+```sh
+t3threads manage local:THREAD_ID --action interrupt
+t3threads manage local:THREAD_ID --action archive
+t3threads manage local:THREAD_ID --action unarchive
+t3threads manage local:THREAD_ID --action rename --title 'Billing webhook retries'
+```
+
+Add `--dry-run` to preview the change.
+
+## Keep delivery running
+
+A background worker delivers queued messages and watcher notifications.
+t3threads starts it when needed. After a crash or reboot, the next t3threads
+command or MCP session restarts pending work. On macOS, install the worker as a
+login service so it runs without you:
+
+```sh
+t3threads service install
+t3threads service status
+```
+
+The service starts at login, restarts after a crash, and loads new versions of
+t3threads automatically. It appears as **T3 Threads** in Login Items, and it
+writes `service.log` to the [state directory](#your-data). Use `service restart`
+to reload it. Use `service uninstall` to remove it; queued messages and watchers
+stay.
+
+Install the service from a permanent installation, such as the global npm
+install above. If you move Node or t3threads, run `service install` again.
+
+The service does not see environment variables from your shell. Store the
+TypeSafe key in the Keychain. A direct connection that uses `tokenEnv` works
+from the service only if that variable is set in the service's environment.
+
+On Linux and Windows, run `t3threads watch-run` under your own service manager.
+
+## Connect other machines
+
+### T3 Connect (macOS)
+
+If you are signed in to T3 Connect in the T3 desktop app, t3threads finds your
+other machines automatically. Run `t3threads environments` to see them. Each one
+is named `connect-ENVIRONMENT_ID`.
+
+t3threads reads T3's saved sign-in and never changes it. If you sign out of T3,
+t3threads loses access too. Sign in through the desktop app at least once;
+headless sign-in does not work. Every machine you want to reach must be running
+T3.
+
+### Direct connections and other T3 data directories
+
+Add environments to `~/.config/t3threads/config.json`, or to
+`$XDG_CONFIG_HOME/t3threads/config.json` if you set that variable:
 
 ```json
 {
@@ -272,205 +334,109 @@ Optional configuration: `$XDG_CONFIG_HOME/t3threads/config.json`, or
 }
 ```
 
-Select with `--env workstation` or `workstation:THREAD_ID`. Direct remote access
-uses an existing T3 environment bearer session from the named environment
-variable. Remote URLs require HTTPS or a loopback SSH tunnel. Tokens are never
-printed, passed in process arguments, or forwarded through HTTP redirects.
-Cloud identity tokens cannot replace environment sessions.
+- `home` points to another T3 data directory on this machine. `command` sets the
+  `t3` executable to use with it.
+- `url` connects straight to a remote T3 server. `tokenEnv` names the environment
+  variable that holds an existing T3 session token for that server. The URL must
+  use HTTPS, or point to a local SSH tunnel.
 
-T3 Connect discovery reuses T3's existing signed-in account. On macOS, a read-only
-native adapter opens T3's encrypted Clerk cache with its existing Keychain Safe
-Storage key, asks Clerk for the same `t3-relay` session JWT the T3 client uses,
-and follows T3's DPoP connection protocol. It never changes T3's credential files
-or stores a second cloud login. Per-environment session credentials and DPoP keys
-are kept in t3threads' private state and renewed through the same account. Sign-out
-in T3 is respected on the next connection. Connect targets are named
-`connect-ENVIRONMENT_UUID`; `environments` shows their friendly labels.
+Use the name with `--env workstation`, or in a thread reference such as
+`workstation:THREAD_ID`. By default, `local` is `$T3CODE_HOME` or `~/.t3`. Use
+`--home PATH` to change it for one command.
 
-A local T3 server must be running. The GUI may be closed once it has established
-the saved sign-in; headless-only OAuth sign-in cannot currently bootstrap a relay
-client session. Windows/Linux encrypted desktop credential adapters are not yet
-implemented. Direct named environment sessions remain available there.
+## Models and privacy
 
-Optional `connect` configuration can override `home`, `relayUrl`, `issuerUrl`, or
-`jwtTemplate` for another T3 installation. Normal installations need none of these.
+- `overview`, `projects`, `list`, `search`, `read`, and all commands that change
+  threads make no model calls.
+- `summarize`, `find`, and `text` watchers use the text-generation model you
+  selected in T3's settings. t3threads runs it through your local Codex or Claude
+  CLI, with tools disabled. Other providers are not supported yet. Use
+  `--model-env NAME` to take the model setting from another local T3
+  environment.
+- Model results are cached. Asking the same question about unchanged threads
+  does not call the model again.
+- `classify` and `jev` watchers send thread text to TypeSafe, only when you use
+  them.
 
-## Watch other threads
+t3threads never opens T3's database and never stores a separate cloud login.
 
-```sh
-t3threads watch --threads local:THREAD_A --threads connect-ENV_ID:THREAD_B \
-  --caller local:CALLER_ID --condition all-completed
+### Your data
 
-t3threads watch --threads local:THREAD_A --caller local:CALLER_ID \
-  --condition text --prompt 'The thread says the implementation and tests are done and provides its PR URL.'
-
-t3threads watchers
-t3threads unwatch WATCH_ID
-```
-
-In MCP, `threads` is an array, `caller` is the calling T3 thread reference, and
-`condition` is an enum. Resolve the caller from `list` by its current worktree or
-thread ID; do not confuse a provider's conversation ID with a T3 thread ID.
-
-Conditions: `all-completed` (every latest turn succeeded), `all-idle` (none are
-running), `any-error`, `changed`, `text` (caller-defined prompt), or `jev`
-(caller-defined prompt with probability threshold, default 0.9). A completed
-turn is not a guarantee that the overall task or PR is ready. The watched set is
-explicit and frozen at registration, so newly opened threads cannot extend it.
-An unavailable/missing thread prevents a condition from triggering. Custom
-conditions use cached recent text with disclosed coverage and a 100,000-character
-evaluation budget; split larger sets or use a deterministic condition.
-
-Watchers persist immediately and start a detached worker. Default polling is
-30 seconds (`--interval-seconds`), with a 24-hour lifetime (`--expires-in-hours`).
-The worker continues after the CLI/MCP exits. Registration and any later CLI/MCP
-startup restart pending watchers after a worker/process crash or machine reboot.
-For unattended restart at login on macOS, install the background service below.
-No model runs for deterministic status checks. Semantic decisions are reused
-until the input changes.
-
-On a match, a one-shot event is persisted and a follow-up wakes the caller using
-its existing model and settings. Busy callers retain a pending notification until
-they become idle. The notification command ID is persisted before dispatch and
-T3's command receipts deduplicate crash/lost-response retries. `watchers` shows
-evidence, errors, and delivery state. Cancellation prevents undelivered work; it
-cannot recall a message already dispatched. `--events-only` records the event
-without waking a caller. Expiration also ends pending delivery attempts.
-
-`manage THREAD --action interrupt|archive|unarchive|rename` uses T3 orchestration;
-renaming requires `--title`. `--dry-run` returns the command without applying it.
-
-## Background service (macOS)
-
-```sh
-t3threads service install
-t3threads service start
-t3threads service status
-t3threads service restart
-```
-
-Install once from a permanent, built installation of t3threads. The per-user
-LaunchAgent starts at login, keeps the shared watcher/message worker ready even
-when idle, and restarts it after a crash. No terminal, CLI, or MCP session needs
-to stay open. It shares the worker lease with detached workers so only one
-process delivers messages at a time. T3 Code must also be running; unavailable
-servers are retried automatically.
-
-The service follows upgrades to the installed package automatically. Update
-t3threads with your existing package manager, such as `npm install --global
-t3threads@latest` or `volta install t3threads@latest`. The worker checks the
-installed runtime every five seconds. After observing stable changed files, it
-finishes its current delivery pass, releases the worker lease, and exits so
-launchd loads the updated code. Queued messages and watchers remain in the same
-state directory. This works with `--ignore-scripts` and with same-version local
-builds; reinstalling identical code does not cause a restart. The service does
-not download releases or update npm/Volta packages itself.
-
-Repeating `service install` with an unchanged definition preserves the running
-worker. `service start` loads an installed service if needed; `service restart`
-explicitly reloads it. Both use the installed plist, preserving its state and
-configuration paths even when invoked from another shell environment.
-
-The agent is `~/Library/LaunchAgents/com.attune.t3threads.plist`. Its log is
-`service.log` in the state directory. Login Items identifies it as **T3 Threads**
-through a private launcher at `service/T3 Threads` in that directory. The
-launcher executes Node without adding a supervisor process. No signing
-certificate is needed for this local service identity. Installation preserves
-the selected state directory, PATH, and configuration locations; it does not copy shell secrets
-into the plist. T3 Connect and Keychain credentials remain available. Credentials
-supplied only through shell environment variables must also be available to the
-service environment.
-
-`t3threads service uninstall` stops the service and removes automatic startup,
-preserving queued messages, watchers, and other state. Reinstall after moving
-the package or Node executable. Service management currently supports macOS;
-`watch-run` remains available for foreground delivery on other platforms.
+t3threads keeps its own state in a private directory: `$T3THREADS_STATE_DIR` if
+set, otherwise `$XDG_STATE_HOME/t3threads`, otherwise `~/.local/state/t3threads`.
+The directory holds cached thread text, model results, watchers, queued messages,
+and connection keys. Deleting it clears all of these, including messages that
+were not yet delivered.
 
 ## Jev classifiers
 
-Set `TYPESAFE_API_KEY`, or on macOS store the key as a generic password in the
-login Keychain with service `t3threads.typesafe` and account equal to your macOS
-username. The CLI, MCP server, and watcher worker read that item automatically;
-the environment variable takes precedence. `doctor` reports availability without
-revealing the key. Then:
+`classify` asks many threads the same structured questions at once and returns
+probabilities, for example "Does this thread change billing webhooks?" It uses
+Jev from [TypeSafe](https://typesafe.ai) and needs a TypeSafe API key.
+
+Set `TYPESAFE_API_KEY`, or store the key in the macOS Keychain:
 
 ```sh
-t3threads classify --project Sorted --questions-json \
+security add-generic-password -s t3threads.typesafe -a "$USER" -w
+```
+
+Then ask your questions:
+
+```sh
+t3threads classify --project my-app --questions-json \
   '{"overlap":{"type":"noul","instructions":"Does this work change billing webhooks?"},"area":{"type":"choice","instructions":"What area is being changed?","criteria":{"billing":"Payments or subscriptions","other":"Other work"}}}'
 ```
 
-MCP accepts the same object directly in `questions`. Jev supports `noul`, `choice`,
-and `score` questions, batched per thread and cached by content/questions/model.
-Responses preserve probabilities, the returned model ID, and token usage.
-The default model is `jev-1.13.0`; `T3THREADS_JEV_MODEL` can override it.
-Thread text is sent to TypeSafe only when a Jev operation is explicitly selected.
+Jev supports `noul`, `choice`, and `score` questions. In MCP, pass the same
+object as `questions`. Set `T3THREADS_JEV_MODEL` to use a model other than the
+default `jev-1.13.0`.
 
-State is in `$T3THREADS_STATE_DIR`, or `$XDG_STATE_HOME/t3threads`, defaulting to
-`~/.local/state/t3threads`. The directory is private and its database uses mode
-0600. This is t3threads' own database; T3's database is never opened. It contains
-cached thread text, model results, watch records, queued prompts and delivery
-records, and environment session keys. Deleting it clears these caches,
-registrations, and undelivered messages.
+## Use it from JavaScript
 
-## Development
+The package exports a Fetch handler with the same commands:
 
-`npm ci` installs shared contributor skills for Codex (`.agents/skills`) and
-Claude Code (`.claude/skills`). Like Sorted, postinstall reuses a cache in the
-shared Git directory across worktrees. Run `npm run skills:update` to refresh
-from upstream using the pinned `skills@1.5.22` installer.
+```js
+import { cli } from 't3threads'
 
-The selected skills are `babysit`, `code-craft`, `gh-stack`, `merge-open-prs`,
-`resolve-pr-conflicts`, `ship-it`, `tag-release`, and `testing-craft` from
-`jssblck/agents`, plus `typesafe-ai` from `typesafe-ai/skills`. Platform and UI
-skills are not installed. Downloads and `skills-lock.json` are ignored by Git;
-the lock records upstream content but does not pin it. Tracked skills are
-protected from replacement.
-
-Skill setup is best effort: a failed download reports how to retry without
-failing dependency installation. CI and published npm installs skip it.
-Set `T3THREADS_SKIP_POSTINSTALL=1` to skip it in a checkout. The bundled
-`skills/t3threads` skill for CLI users is separate from these contributor skills.
-
-```sh
-npm ci
-npm run check
-npm run dev -- doctor --json
+const response = await cli.fetch(new Request('http://local/projects'))
+console.log(await response.json())
 ```
 
-The tests cover native credential reuse, DPoP signatures/exchange, cross-machine
-partial results, pagination, model-result caching, Jev validation, durable watcher
-delivery/recovery/cancellation, steering, durable queued follow-ups, a detached
-worker, CLI/API validation, and real
-stdio/HTTP MCP transports against disposable protocol fixtures. They do not
-require accounts or invoke models.
+Read commands take query parameters. Commands that change threads take a JSON
+`POST` body:
 
-Compatibility target: T3 `0.0.43-nightly.20260922.2110`, orchestration protocol 1,
-plus the known `0.0.42` legacy descriptor (which omits the protocol field).
-These are application APIs, not a promised stable third-party SDK. Reads use the
-HTTP shell and per-thread snapshots. Writes use `orchestration.dispatchCommand`
-over authenticated WebSocket, including T3's thread/worktree bootstrap. The HTTP
-dispatch route does not perform that bootstrap.
+```js
+await cli.fetch(new Request('http://local/start', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({
+    project: 'PROJECT_ID', checkout: 'worktree',
+    prompt: 'Review this change and report findings.', dryRun: true
+  })
+}))
+```
 
-CI tests Node 22 and 24 on macOS, Linux, and Windows. It also installs the packed
-tarball into a temporary global prefix and checks the CLI and stdio MCP startup
-outside the checkout, without install scripts or development dependencies.
-It then verifies that the published postinstall hook runs without installing skills.
-Run this check locally with `npm pack && npm run test:package`.
+The handler also serves `/openapi.json` and HTTP MCP at `/mcp`. It does not start
+a server on its own. It can control your T3 threads and read local files, so
+keep it on your machine or add your own authentication before you expose it.
 
-### Releases
+## Troubleshooting
 
-The release workflow checks, packs, and smoke-tests the package on a `v*` tag.
-It publishes the tested tarball to npm, then attaches it and its SHA-256 checksum
-to a GitHub release. The tag must match the version in `package.json`.
+- Run `t3threads doctor` first.
+- `complete: false` means that a machine was unreachable or a limit was reached.
+  Check `errors` and the reported coverage.
+- `MATCHING_CLI_REQUIRED` means that t3threads needs a `t3` command with the same
+  version as the running T3 server. On macOS, it uses the one inside the T3 app.
+  Elsewhere, install the matching `t3` CLI, or set `command` for that
+  environment in the configuration file.
+- `UNSUPPORTED_SERVER` means that your T3 version is too old. Update T3.
+- If your agent does not see the t3threads tools, start a new thread or restart
+  the provider session.
 
-For a release, update the version with `npm version patch` (or `minor`/`major`),
-then push the release commit and its version tag. Use a new version for every
-npm release; published versions cannot be overwritten.
+## Contributing
 
-Publishing uses [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
-with GitHub organization `attunehq`, repository `t3threads`, and workflow file
-`release.yml`. The npm package's trusted publisher must allow `npm publish`.
-No npm publishing token is stored in GitHub. The initial publication requires
-an npm maintainer login before this package-level trust can be configured.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-MIT licensed. Independent project; not affiliated with T3.
+## License
+
+MIT. t3threads is an independent project and is not affiliated with T3.
