@@ -90,6 +90,39 @@ test("send steering and enqueue previews share validation and attribution throug
   assert.equal((await call({ enqueue: true })).error.code, "THREAD_INACTIVE");
 });
 
+test("external callers steer with attribution and source context without a sender thread", async t => {
+  const f = await fixture(t), cli = createCli();
+  f.stored.get("t1")!.latestTurn = { state: "running" };
+  const promptFile = `${f.dir}/slack.txt`;
+  const prompt = "Ada sent this from Slack: continue the investigation.\nhttps://example.slack.com/archives/CADA/p1000001\nReply in the Slack thread using jessbot.";
+  await writeFile(promptFile, prompt);
+  const call = async (extra: object = {}) => (await cli.fetch(new Request("http://cli/send/t1", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ config: f.configPath, externalCaller: "jessbot", promptFile, ...extra }),
+  }))).json() as Promise<any>;
+  assert.equal((await call({ caller: "local:t1", steer: true })).error.code, "INVALID_ARGUMENT");
+  assert.equal((await call({ externalCaller: undefined })).error.code, "INVALID_ARGUMENT");
+  assert.equal((await call({ externalCaller: " " })).ok, false);
+  assert.equal((await call()).error.code, "THREAD_BUSY");
+  assert.equal((await call({ steer: true, enqueue: true })).error.code, "INVALID_ARGUMENT");
+  for (const mode of ["steer", "enqueue"]) {
+    const preview = await call({ [mode]: true, dryRun: true });
+    assert.equal(preview.ok, true, JSON.stringify(preview));
+    assert.match(preview.data.command.message.text, /external caller "jessbot"/);
+    assert.ok(preview.data.command.message.text.endsWith(prompt));
+    assert.doesNotMatch(preview.data.command.message.text, /Sender thread:|To reply, use t3threads/);
+    assert.deepEqual(preview.data.command.modelSelection, thread.modelSelection);
+    assert.equal(preview.data.command.runtimeMode, thread.runtimeMode);
+    assert.equal(preview.data.command.interactionMode, thread.interactionMode);
+    assert.equal(f.commands.length, 0);
+  }
+  assert.equal((await call({ steer: true })).data.status, "accepted");
+  assert.equal(f.commands.length, 1);
+  assert.ok(f.commands[0]!.message.text.endsWith(prompt));
+  f.stored.get("t1")!.archivedAt = "today";
+  assert.equal((await call({ steer: true })).error.code, "THREAD_INACTIVE");
+});
+
 test("temporary sessions are revoked after success and failure", async t => {
   const f = await fixture(t, (_req, res) => { json(res, { secret: "test-secret" }, 500); return true; });
   await withApi(f.target, async () => "ok");

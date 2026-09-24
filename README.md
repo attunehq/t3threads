@@ -327,6 +327,19 @@ sender's title and a reply address, marked as a message from another agent, not
 from you. Find your own thread ID with `list`. A provider's session ID is not a
 T3 thread ID.
 
+Integrations outside T3 use `--external-caller NAME` instead of `--caller`:
+
+```sh
+t3threads send local:THREAD_ID --external-caller jessbot --steer \
+  --prompt-file /private/path/slack-request.txt
+```
+
+Supply exactly one caller option. External messages identify the integration
+without inventing a T3 sender thread. Include the original request, its source
+link, and instructions for replying in the prompt. The caller name is a label
+supplied by the integration, not a verified user identity. External callers can
+also use `--enqueue` and `--dry-run`.
+
 Queued messages survive restarts and crashes, and a retry after a crash does not
 deliver a message twice. The machine that queued a message must stay on until
 the message is delivered. On macOS, install the

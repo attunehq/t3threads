@@ -47,7 +47,8 @@ test("stdio MCP advertises schemas and runs the same read and write commands", {
   assert.ok(tools.find(t => t.name === "read")?.inputSchema.properties.env);
   assert.equal(tools.find(t => t.name === "watch")?.annotations.readOnlyHint, false);
   assert.ok(tools.find(t => t.name === "watch")?.inputSchema.properties.condition);
-  assert.ok(tools.find(t => t.name === "send")?.inputSchema.required?.includes("caller"));
+  assert.ok(tools.find(t => t.name === "send")?.inputSchema.properties.caller);
+  assert.ok(tools.find(t => t.name === "send")?.inputSchema.properties.externalCaller);
   assert.ok(tools.find(t => t.name === "send")?.inputSchema.properties.steer);
   assert.ok(tools.find(t => t.name === "send")?.inputSchema.properties.enqueue);
   assert.equal(tools.find(t => t.name === "queued")?.annotations.readOnlyHint, true);
@@ -76,6 +77,13 @@ test("stdio MCP advertises schemas and runs the same read and write commands", {
   const steered = await call("tools/call", { name: "send", arguments: { config: f.configPath, thread: "t1", caller: "local:t1", prompt: "Continue now.", steer: true } });
   assert.ok(!steered.result.isError, JSON.stringify(steered));
   assert.equal(f.commands.length, 3);
+  const external = await call("tools/call", { name: "send", arguments: { config: f.configPath, thread: "t1", externalCaller: "jessbot", prompt: "Ada sent a Slack follow-up.", steer: true } });
+  assert.ok(!external.result.isError, JSON.stringify(external));
+  assert.equal(f.commands.length, 4);
+  assert.match(f.commands[3]!.message.text, /external caller "jessbot"/);
+  const bothCallers = await call("tools/call", { name: "send", arguments: { config: f.configPath, thread: "t1", caller: "local:t1", externalCaller: "jessbot", prompt: "Continue.", steer: true } });
+  assert.equal(bothCallers.result.isError, true);
+  assert.equal(f.commands.length, 4);
   const invalid = await call("tools/call", { name: "read", arguments: { config: f.configPath, thread: "t1", turns: 0 } });
   assert.equal(invalid.result.isError, true);
   assert.ok(!stderr.includes("test-secret"));
