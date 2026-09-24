@@ -1,6 +1,6 @@
 {
   "name": "t3threads",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Discover, search, summarize, classify, watch, and manage T3 Code threads across machines.",
   "type": "module",
   "license": "MIT",

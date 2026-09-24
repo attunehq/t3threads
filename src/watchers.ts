@@ -9,6 +9,7 @@ import { targetFor, parseRef, safeError, type Common } from "./environments.js";
 import { card, busy, generator, judge, type Card, type Generator } from "./intelligence.js";
 import { dispatch, readThread, sendCommand, type Thread } from "./threads.js";
 import { State, digest } from "./state.js";
+import { pendingMessages, queueDelivery, tickQueue } from "./queue.js";
 
 export const conditionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.enum(["all-completed", "all-idle", "any-error", "changed"]) }),
@@ -146,21 +147,29 @@ export function cancelWatch(id: string, state = new State()) {
   });
 }
 function alive(pid: number) { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code !== "ESRCH"; } }
-export async function worker(state = new State(), signal?: AbortSignal, rt = runtime(signal)) {
+export async function worker(state = new State(), signal?: AbortSignal, rt = runtime(signal), persistent = false, shouldStop?: () => Promise<boolean>) {
   const owner = crypto.randomUUID();
   const lease = state.update<{ owner: string; pid: number }>("worker", "lease", current => current && alive(current.pid) ? current : { owner, pid: process.pid });
   if (lease.owner !== owner) return;
+  let drained = false;
   try {
     while (!signal?.aborted) {
+      if (shouldStop && await shouldStop()) return;
+      await tickQueue(state, queueDelivery(signal));
       await tick(state, rt);
-      if (!state.list<Watch>("watch").some(w => ["active", "pending"].includes(w.status))) return;
+      if (!persistent && !hasWork(state)) { drained = true; return; }
       await delay(1000, undefined, { signal });
     }
   } catch (error) { if (!signal?.aborted) throw error; }
-  finally { state.transaction(db => { db.prepare("DELETE FROM entries WHERE kind='worker' AND id='lease' AND json_extract(value,'$.owner')=?").run(owner); }); }
+  finally {
+    state.transaction(db => { db.prepare("DELETE FROM entries WHERE kind='worker' AND id='lease' AND json_extract(value,'$.owner')=?").run(owner); });
+    // An enqueue may have seen our live lease just before we drained.
+    if (drained) ensureWorker(state);
+  }
 }
+const hasWork = (state: State) => pendingMessages(state).length > 0 || state.list<Watch>("watch").some(w => ["active", "pending"].includes(w.status));
 export function ensureWorker(state = new State()) {
-  if (!state.list<Watch>("watch").some(w => ["active", "pending"].includes(w.status))) return;
+  if (!hasWork(state)) return;
   const lease = state.get<{ pid: number }>("worker", "lease");
   if (lease && alive(lease.pid)) return;
   const source = fileURLToPath(import.meta.url).endsWith(".ts");

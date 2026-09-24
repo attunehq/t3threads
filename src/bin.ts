@@ -9,5 +9,5 @@ const stop = () => {
 };
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);
-if (!process.argv.includes("watch-run")) ensureWorker();
+if (!process.argv.includes("watch-run") && !process.argv.includes("service")) ensureWorker();
 await createCli({ signal: controller.signal }).serve();

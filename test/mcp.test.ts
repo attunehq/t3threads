@@ -40,7 +40,7 @@ test("stdio MCP advertises schemas and runs the same read and write commands", {
   child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
   const listed = await call("tools/list");
   const tools = listed.result.tools as { name: string; annotations: { readOnlyHint: boolean; idempotentHint: boolean }; inputSchema: { properties: Record<string, unknown>; required?: string[] } }[];
-  assert.deepEqual(tools.map(t => t.name).sort(), ["classify", "doctor", "environments", "find", "list", "manage", "overview", "projects", "read", "search", "send", "start", "summarize", "unwatch", "watch", "watchers"]);
+  assert.deepEqual(tools.map(t => t.name).sort(), ["classify", "doctor", "environments", "find", "list", "manage", "overview", "projects", "queued", "read", "search", "send", "start", "summarize", "unqueue", "unwatch", "watch", "watchers"]);
   assert.equal(tools.find(t => t.name === "read")?.annotations.readOnlyHint, true);
   assert.equal(tools.find(t => t.name === "start")?.annotations.readOnlyHint, false);
   assert.equal(tools.find(t => t.name === "start")?.annotations.idempotentHint, false);
@@ -48,6 +48,10 @@ test("stdio MCP advertises schemas and runs the same read and write commands", {
   assert.equal(tools.find(t => t.name === "watch")?.annotations.readOnlyHint, false);
   assert.ok(tools.find(t => t.name === "watch")?.inputSchema.properties.condition);
   assert.ok(tools.find(t => t.name === "send")?.inputSchema.required?.includes("caller"));
+  assert.ok(tools.find(t => t.name === "send")?.inputSchema.properties.steer);
+  assert.ok(tools.find(t => t.name === "send")?.inputSchema.properties.enqueue);
+  assert.equal(tools.find(t => t.name === "queued")?.annotations.readOnlyHint, true);
+  assert.equal(tools.find(t => t.name === "unqueue")?.annotations.readOnlyHint, false);
   const overview = await call("tools/call", { name: "overview", arguments: { config: f.configPath, env: "local" } });
   assert.ok(!overview.result.isError, JSON.stringify(overview));
   assert.ok(JSON.stringify(overview.result).includes("local:t1"));
@@ -68,6 +72,10 @@ test("stdio MCP advertises schemas and runs the same read and write commands", {
   assert.match(f.commands[1]!.message.text, /Sender thread: local:t1/);
   assert.match(f.commands[1]!.message.text, /from another agent, not the user/);
   assert.ok(f.commands[1]!.message.text.endsWith("\n\nCheck the tests."));
+  f.stored.get("t1")!.latestTurn = { state: "running" };
+  const steered = await call("tools/call", { name: "send", arguments: { config: f.configPath, thread: "t1", caller: "local:t1", prompt: "Continue now.", steer: true } });
+  assert.ok(!steered.result.isError, JSON.stringify(steered));
+  assert.equal(f.commands.length, 3);
   const invalid = await call("tools/call", { name: "read", arguments: { config: f.configPath, thread: "t1", turns: 0 } });
   assert.equal(invalid.result.isError, true);
   assert.ok(!stderr.includes("test-secret"));

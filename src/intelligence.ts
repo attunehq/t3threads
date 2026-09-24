@@ -7,7 +7,8 @@ import { parse as parseToml } from "smol-toml";
 import { Api, expand, fail, object, exists } from "./client.js";
 import { State, digest } from "./state.js";
 import { jevApiKey } from "./secrets.js";
-import { readThread, type Model, type Thread } from "./threads.js";
+import { busy, readThread, type Model, type Thread } from "./threads.js";
+export { busy } from "./threads.js";
 
 export const questionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("noul"), instructions: z.string().min(1), criteria: z.object({ true: z.string(), false: z.string() }).optional() }),
@@ -17,7 +18,6 @@ export const questionSchema = z.discriminatedUnion("type", [
 export const questionsSchema = z.record(z.string(), questionSchema).refine(v => Object.keys(v).length > 0 && Object.keys(v).length <= 100, "Supply 1-100 questions");
 export type Questions = z.infer<typeof questionsSchema>;
 export type Card = { ref: string; fingerprint: string; title: string; projectId: string; status: string; branch: string | null; text: string; coverage: { turns: number; hasOlder: boolean; truncated: boolean } };
-export const busy = (t: Thread) => Boolean(t.session?.activeTurnId || ["starting", "running"].includes(t.session?.status ?? "") || t.latestTurn?.state === "running");
 export function status(t: Thread) {
   if (t.deletedAt) return "deleted";
   if (busy(t)) return "running";

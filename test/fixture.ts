@@ -41,7 +41,7 @@ export async function fixture(t: TestContext, handler?: (req: IncomingMessage, r
     if (new URL(req.url!, "http://localhost").searchParams.get("wsTicket") !== "one-time-ticket") return socket.destroy();
     wss.handleUpgrade(req, socket, head, ws => wss.emit("connection", ws));
   });
-  const control = { reject: false, disconnect: false, pinged: false };
+  const control = { reject: false, disconnect: false, loseReceipt: false, startRunning: false, pinged: false };
   wss.on("connection", ws => {
     ws.send(JSON.stringify({ _tag: "Ping" }));
     ws.on("message", raw => {
@@ -52,6 +52,8 @@ export async function fixture(t: TestContext, handler?: (req: IncomingMessage, r
       if (frame.tag === "server.getSettings") return ws.send(JSON.stringify({ _tag: "Exit", requestId: frame.id, exit: { _tag: "Success", value: { textGenerationModelSelection: project.defaultModelSelection, providerInstances: { "codex-work": { driver: "codex", enabled: true, config: {} } } } } }));
       if (frame.tag !== "orchestration.dispatchCommand") throw Error("Wrong RPC method");
       const command = frame.payload as ReturnType<typeof startCommand>;
+      const prior = commands.findIndex(c => c.commandId === command.commandId);
+      if (prior >= 0) return ws.send(JSON.stringify({ _tag: "Exit", requestId: frame.id, exit: { _tag: "Success", value: { sequence: prior + 1 } } }));
       commands.push(command);
       if (command.type !== "thread.turn.start") {
         const value = stored.get(command.threadId)!;
@@ -63,7 +65,9 @@ export async function fixture(t: TestContext, handler?: (req: IncomingMessage, r
       }
       const value: Thread = command.bootstrap?.createThread ? { ...thread, ...command.bootstrap.createThread, id: command.threadId, messages: [] } : stored.get(command.threadId)!;
       value.messages = [...(value.messages ?? []), { id: command.message.messageId, role: command.message.role, text: command.message.text, createdAt: command.createdAt }];
+      if (control.startRunning) value.latestTurn = { state: "running" };
       stored.set(value.id, value);
+      if (control.loseReceipt) return ws.close();
       ws.send(JSON.stringify([{ _tag: "Exit", requestId: "unrelated", exit: { _tag: "Success", value: {} } }, { _tag: "Exit", requestId: frame.id, exit: { _tag: "Success", value: { sequence: commands.length } } }]));
     });
   });

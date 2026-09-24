@@ -127,9 +127,12 @@ export function startCommand(project: Project, options: { prompt: string; title?
   };
 }
 
-export function sendCommand(thread: Thread, prompt: string, sender?: { ref: string; title: string; environmentId: string; replyRef: string }) {
+export const busy = (t: Thread) => Boolean(t.session?.activeTurnId || ["starting", "running"].includes(t.session?.status ?? "") || t.latestTurn?.state === "running");
+
+export function sendCommand(thread: Thread, prompt: string, sender?: { ref: string; title: string; environmentId: string; replyRef: string }, delivery: "idle" | "steer" = "idle") {
   if (thread.deletedAt || thread.archivedAt) fail("THREAD_INACTIVE", "Restore this thread in T3 before sending a prompt.");
-  if (thread.session?.activeTurnId || thread.latestTurn?.state === "running" || ["starting", "running"].includes(thread.session?.status ?? "")) fail("THREAD_BUSY", "The thread is running. Wait for it to finish before sending a follow-up.");
+  // T3 routes thread.turn.start to the running provider as steering input.
+  if (delivery === "idle" && busy(thread)) fail("THREAD_BUSY", "The thread is running. Use --steer to send now or --enqueue to wait until it is idle.");
   if (sender) prompt = `[t3threads agent message]
 From: agent in T3 thread ${JSON.stringify(sender.title)}
 Sender thread: ${sender.ref}
