@@ -2,3 +2,8 @@ node_modules/
 dist/
 *.tgz
 coverage/
+
+# Shared contributor skills installed by postinstall and skills:update.
+.agents/skills/
+.claude/skills/
+skills-lock.json

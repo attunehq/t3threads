@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -20,6 +20,13 @@ try {
   const installed = join(root, pkg.name);
   const manifest = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"));
   assert.equal(manifest.version, pkg.version);
+  assert.equal(existsSync(join(installed, "scripts/postinstall.mjs")), true);
+  assert.equal(existsSync(join(installed, "scripts/skills-update.mjs")), false);
+  assert.equal(manifest.scripts.postinstall, "node scripts/postinstall.mjs");
+  execFileSync(process.execPath, [join(installed, "scripts/postinstall.mjs")], {
+    ...options, cwd: installed, env: { ...env, CI: "", T3THREADS_SKIP_POSTINSTALL: "" },
+  });
+  assert.equal(existsSync(join(installed, ".agents")), false);
   const windows = process.platform === "win32";
   const shim = windows ? join(prefix, "t3threads.cmd") : join(prefix, "bin", "t3threads");
   const help = windows
