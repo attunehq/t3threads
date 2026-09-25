@@ -120,8 +120,10 @@ generic password with service `t3threads.typesafe` and the current macOS usernam
 as its account. Jev is opt-in and sends selected thread text to TypeSafe.
 Keep probability thresholds and uncertain results visible.
 
-`manage REF --action interrupt|archive|unarchive|rename` handles authorized
-thread management. Renaming needs `--title`; `--dry-run` previews the command.
+`manage REF --action interrupt|settle|archive|unarchive|rename` handles authorized
+thread management. Settle finished work without archiving; later activity can reopen it.
+Settlement requires the server threadSettlement capability and rejects running or queued work.
+Renaming needs `--title`; `--dry-run` previews the command.
 
 Run `doctor` for setup. T3 must be running; the GUI can be closed after a saved
 sign-in exists. Connect reuses T3's native macOS credential cache and Keychain

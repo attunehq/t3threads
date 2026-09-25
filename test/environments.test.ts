@@ -30,6 +30,35 @@ test("manage uses native mutation commands, requires POST, and validates rename 
   assert.equal((await call("archive")).ok, true); assert.equal(f.stored.get("t1")!.archivedAt, "today");
   assert.equal((await call("unarchive")).ok, true); assert.equal(f.stored.get("t1")!.archivedAt, null);
   assert.equal((await call("interrupt")).ok, true); assert.equal(f.stored.get("t1")!.latestTurn?.state, "interrupted");
+  assert.equal((await call("settle")).ok, true); assert.equal(f.stored.get("t1")!.settledAt, "today");
+  assert.equal((await call("settle", "Ada")).ok, false);
   const get = await cli.fetch(new Request(`http://cli/manage/t1?config=${encodeURIComponent(f.configPath)}&action=archive`));
   assert.equal((await get.json() as { ok: boolean }).ok, false);
+});
+
+test("settlement previews native commands and refuses unsupported servers", async t => {
+  const cli = createCli(), supported = await fixture(t);
+  const call = async (config: string, dryRun = false) => (await (await cli.fetch(new Request("http://cli/manage/t1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ config, action: "settle", dryRun }) }))).json()) as { ok: boolean; data: { command: { type: string; threadId: string } } };
+  const preview = await call(supported.configPath, true);
+  assert.equal(preview.ok, true);
+  assert.equal(preview.data.command.type, "thread.settle");
+  assert.equal(preview.data.command.threadId, "t1");
+  assert.equal(supported.commands.length, 0);
+  const unsupported = await fixture(t);
+  unsupported.target.descriptor.capabilities = {};
+  assert.equal((await call(unsupported.configPath)).ok, false);
+  assert.equal(unsupported.commands.length, 0);
+});
+
+test("list exposes the shell metadata needed to settle completed investigations", async t => {
+  const f = await fixture(t), cli = createCli();
+  Object.assign(f.stored.get("t1")!, { settledAt: null, hasPendingApprovals: false, hasPendingUserInput: true, hasActionableProposedPlan: false, backgroundLiveness: "monitoring" });
+  const response = await cli.fetch(new Request(`http://cli/list?config=${encodeURIComponent(f.configPath)}`));
+  const result = await response.json() as { data: { results: { threads: Record<string, unknown>[] }[] } };
+  const thread = result.data.results[0]!.threads[0]!;
+  assert.equal(thread.settledAt, null);
+  assert.equal(thread.hasPendingApprovals, false);
+  assert.equal(thread.hasPendingUserInput, true);
+  assert.equal(thread.hasActionableProposedPlan, false);
+  assert.equal(thread.backgroundLiveness, "monitoring");
 });

@@ -11,7 +11,7 @@ import { startCommand, type Project, type Thread } from "../src/threads.js";
 export const project: Project = { id: "p1", title: "Grace Hopper", workspaceRoot: "/work/grace", defaultModelSelection: { instanceId: "codex-work", model: "saved-model", options: [{ id: "reasoningEffort", value: "high" }] } };
 export const thread: Thread = { id: "t1", projectId: "p1", title: "Earlier design", updatedAt: "2026-09-22T00:00:00Z", modelSelection: project.defaultModelSelection!, runtimeMode: "approval-required", interactionMode: "plan", branch: "main", worktreePath: null, session: null, latestTurn: null };
 export const message = (id: string, text: string) => ({ id, role: "assistant", text, createdAt: `2026-09-${id.padStart(2, "0")}T00:00:00Z` });
-export const descriptor = { environmentId: "test-env", serverVersion: "0.0.43-test", orchestrationProtocolVersion: 1, capabilities: { requiredWorktreeBootstrap: true } };
+export const descriptor = { environmentId: "test-env", serverVersion: "0.0.43-test", orchestrationProtocolVersion: 1, capabilities: { requiredWorktreeBootstrap: true, threadSettlement: true } };
 export const json = (res: ServerResponse, value: unknown, status = 200) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(value)); };
 
 export async function fixture(t: TestContext, handler?: (req: IncomingMessage, res: ServerResponse) => boolean | undefined, environmentId = "test-env") {
@@ -63,6 +63,7 @@ export async function fixture(t: TestContext, handler?: (req: IncomingMessage, r
         const value = stored.get(command.threadId)!;
         if (command.type === "thread.archive") value.archivedAt = "today";
         if (command.type === "thread.unarchive") value.archivedAt = null;
+        if (command.type === "thread.settle") value.settledAt = "today";
         if (command.type === "thread.meta.update") value.title = (command as unknown as { title: string }).title;
         if (command.type === "thread.turn.interrupt") { value.latestTurn = { state: "interrupted" }; value.session = null; }
         return ws.send(JSON.stringify({ _tag: "Exit", requestId: frame.id, exit: { _tag: "Success", value: { sequence: commands.length } } }));

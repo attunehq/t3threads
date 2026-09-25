@@ -7,6 +7,7 @@ export type PermissionMode = typeof permissionModes[number];
 export type Project = { id: string; title: string; workspaceRoot: string; defaultModelSelection: Model | null; deletedAt?: string | null };
 export type Thread = {
   id: string; projectId: string; title: string; updatedAt: string; archivedAt?: string | null; deletedAt?: string | null; settledAt?: string | null;
+  hasPendingApprovals?: boolean; hasPendingUserInput?: boolean; hasActionableProposedPlan?: boolean; backgroundLiveness?: string | null;
   modelSelection: Model; runtimeMode: string; interactionMode: string; branch: string | null; worktreePath: string | null;
   latestTurn?: { state: string } | null; session?: { status: string; activeTurnId: string | null; lastError: string | null } | null;
   messages?: { id: string; role: string; text: string; createdAt: string; attachments?: unknown[] }[];
@@ -32,8 +33,8 @@ export function selectProject(projects: Project[], query: string): Project {
 }
 
 export function summary(thread: Thread) {
-  const { id, projectId, title, updatedAt, archivedAt, modelSelection, runtimeMode, interactionMode, branch, worktreePath, latestTurn, session } = thread;
-  return { id, projectId, title, updatedAt, archivedAt, modelSelection, runtimeMode, interactionMode, branch, worktreePath, latestTurn, session };
+  const { id, projectId, title, updatedAt, archivedAt, settledAt, hasPendingApprovals, hasPendingUserInput, hasActionableProposedPlan, backgroundLiveness, modelSelection, runtimeMode, interactionMode, branch, worktreePath, latestTurn, session } = thread;
+  return { id, projectId, title, updatedAt, archivedAt, settledAt, hasPendingApprovals, hasPendingUserInput, hasActionableProposedPlan, backgroundLiveness, modelSelection, runtimeMode, interactionMode, branch, worktreePath, latestTurn, session };
 }
 
 export async function readThread(api: Api, id: string, turns = 20, before?: string): Promise<Snapshot> {
