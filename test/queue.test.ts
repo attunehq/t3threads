@@ -103,10 +103,12 @@ test("cancel before dispatch wins the claim; dispatching messages cannot be reca
 test("offline recipients retry, while inactive, missing, rejected, or changed recipients fail visibly", async t => {
   const f = await fixture(t), state = new State(f.dir + "/state");
   const queued = enqueue(input(f.configPath), state);
-  await tickQueue(state, async () => { throw new CliError("SERVER_UNREACHABLE", "offline"); }, 1000);
-  assert.equal(state.get<QueuedMessage>("message", queued.id)?.status, "pending");
+  for (const [index, code] of ["SERVER_UNREACHABLE", "NATIVE_AUTH_LOCKED", "ENVIRONMENT_NOT_FOUND"].entries()) {
+    await tickQueue(state, async () => { throw new CliError(code, "temporarily unavailable"); }, 1000 + index * 5000);
+    assert.equal(state.get<QueuedMessage>("message", queued.id)?.status, "pending");
+  }
   f.stored.get("t1")!.archivedAt = "today";
-  await tickQueue(state, queueDelivery(), 6000);
+  await tickQueue(state, queueDelivery(), 16000);
   assert.equal(state.get<QueuedMessage>("message", queued.id)?.status, "failed");
   assert.equal(state.get<QueuedMessage>("message", queued.id)?.error?.code, "THREAD_INACTIVE");
   f.stored.get("t1")!.archivedAt = null;

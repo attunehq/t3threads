@@ -141,7 +141,7 @@ test("a persistent worker exits gracefully after a package update and its succes
   f.stored.get("t1")!.latestTurn = { state: "running" };
   const queued = enqueue({ ref: "local:t1", environmentId: "test-env", options: { config: f.configPath }, command: sendCommand(thread, "Continue after upgrade") }, state);
   const start = () => spawn(process.execPath, ["--import", "tsx", join(root, "src", "worker.ts"), "--persistent"], {
-    env: { ...process.env, T3THREADS_STATE_DIR: state.directory }, stdio: "ignore",
+    env: { ...process.env, T3THREADS_STATE_DIR: state.directory, T3CODE_HOME: f.dir, XDG_CONFIG_HOME: join(f.dir, "config-home") }, stdio: "ignore",
   });
   child = start();
   const readyDeadline = Date.now() + 5000;
@@ -172,9 +172,10 @@ test("persistent worker stays ready while idle, delivers later enqueues, and han
     await ended; clearTimeout(timer);
   });
   const f = await fixture(t), state = new State(join(f.dir, "state"));
+  await writeFile(join(f.dir, "userdata/clerk-tokens.json"), JSON.stringify({ __clerk_client_jwt: "raw:fixture-client" }));
   state.put("worker", "lease", { owner: "existing-worker", pid: process.pid });
   child = spawn(process.execPath, ["--import", "tsx", "src/worker.ts", "--persistent"], {
-    env: { ...process.env, T3THREADS_STATE_DIR: state.directory }, stdio: "ignore",
+    env: { ...process.env, T3THREADS_STATE_DIR: state.directory, T3CODE_HOME: f.dir, XDG_CONFIG_HOME: join(f.dir, "config-home") }, stdio: "ignore",
   });
   await delay(1200);
   assert.equal(state.get<{ pid: number }>("worker", "lease")?.pid, process.pid, "the service must wait for an existing worker");
@@ -185,6 +186,8 @@ test("persistent worker stays ready while idle, delivers later enqueues, and han
   assert.equal(state.get<{ pid: number }>("worker", "lease")?.pid, child.pid);
   await delay(1200);
   assert.equal(child.exitCode, null, "empty queues must not terminate the service");
+  assert.equal(state.list("native-client").length, 1, "idle service warms its own credential cache");
+  assert.equal(state.get<{ error: unknown }>("connection-health", "native")?.error, null);
   const queued = enqueue({ ref: "local:t1", environmentId: "test-env", options: { config: f.configPath }, command: sendCommand(thread, "Continue") }, state);
   const deliveryDeadline = Date.now() + 5000;
   while (state.get<QueuedMessage>("message", queued.id)?.status !== "accepted" && Date.now() < deliveryDeadline) await delay(50);
@@ -198,7 +201,7 @@ test("persistent worker stays ready while idle, delivers later enqueues, and han
     // Windows force-terminates on SIGTERM; the next worker must reclaim the stale lease.
     assert.equal(state.get<{ pid: number }>("worker", "lease")?.pid, child.pid);
     child = spawn(process.execPath, ["--import", "tsx", "src/worker.ts"], {
-      env: { ...process.env, T3THREADS_STATE_DIR: state.directory }, stdio: "ignore",
+      env: { ...process.env, T3THREADS_STATE_DIR: state.directory, T3CODE_HOME: f.dir, XDG_CONFIG_HOME: join(f.dir, "config-home") }, stdio: "ignore",
     });
     await once(child, "exit");
   }

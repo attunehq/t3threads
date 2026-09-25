@@ -113,7 +113,7 @@ export async function tickQueue(state = new State(), deliver = queueDelivery(), 
       });
       save({ nextCheck: now + 5000, ...(outcome === "accepted" ? { status: "accepted", acceptedAt: new Date().toISOString(), error: undefined } : {}) });
     } catch (error) {
-      const permanent = error instanceof CliError && (["RPC_REJECTED", "THREAD_INACTIVE", "ENVIRONMENT_MISMATCH", "CONNECT_IDENTITY_MISMATCH", "ENVIRONMENT_NOT_FOUND", "INVALID_MESSAGE", "INVALID_ARGUMENT", "INVALID_CONFIG", "CONFIG_NOT_FOUND"].includes(error.code) || (error.code === "HTTP_ERROR" && (error.details as { status?: number })?.status === 404));
+      const permanent = error instanceof CliError && (["RPC_REJECTED", "THREAD_INACTIVE", "ENVIRONMENT_MISMATCH", "CONNECT_IDENTITY_MISMATCH", "INVALID_MESSAGE", "INVALID_ARGUMENT", "INVALID_CONFIG", "CONFIG_NOT_FOUND"].includes(error.code) || (error.code === "HTTP_ERROR" && (error.details as { status?: number })?.status === 404));
       save({ error: safeError(message.ref, error), nextCheck: now + 5000, ...(permanent ? { status: "failed" } : {}) });
     }
   }
