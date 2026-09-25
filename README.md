@@ -395,12 +395,19 @@ watcher, including a notification that was not yet sent.
 
 ```sh
 t3threads manage local:THREAD_ID --action interrupt
+t3threads manage local:THREAD_ID --action settle
 t3threads manage local:THREAD_ID --action archive
 t3threads manage local:THREAD_ID --action unarchive
 t3threads manage local:THREAD_ID --action rename --title 'Billing webhook retries'
 ```
 
-Add `--dry-run` to preview the change.
+Add `--dry-run` to preview the change. Settlement marks finished work settled
+without archiving it; later activity can reopen the thread. It requires a server
+that advertises `threadSettlement`. T3 rejects settlement while a turn is running
+or work is queued.
+
+`list` includes settlement state; unarchived listings also expose pending approval,
+user input, proposed plan, and background-work metadata from the server.
 
 ## Keep delivery running
 
