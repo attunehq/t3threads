@@ -51,6 +51,11 @@ provider; changing the model clears its old options. `--provider INSTANCE`
 requires `--model MODEL`. A disabled or missing project provider falls back to
 the machine model, as in T3. An explicitly cleared project model is not a request
 to choose one; report the missing default or use a user-requested override.
+Use `--model-options-json` (CLI) or `modelOptions` (MCP/API) only for an explicitly
+requested override. It replaces all model options; omit to inherit, or use `[]`
+to clear them. Codex extra-high uses `[{"id":"reasoningEffort","value":"xhigh"}]`;
+Claude uses the provider's `effort` option. Verify supported IDs/values and both
+model selections in the dry run.
 Do not copy the caller's model. Omit `permission` to inherit T3's setting for
 the destination project, then the destination machine's default. This works for
 local, direct, and T3 Connect environments; do not copy the caller's permissions
