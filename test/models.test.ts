@@ -20,6 +20,32 @@ function expectModel(result: any, model: Model) {
   assert.deepEqual(result.data.command.bootstrap.createThread.modelSelection, model);
 }
 
+test("explicit model options replace inherited options in the preview and dispatched bootstrap", async t => {
+  const f = await fixture(t);
+  f.settings.defaultModelSelection = machine;
+  const options = [{ id: "reasoningEffort", value: "xhigh" }];
+  expectModel(await start(f.configPath, { modelOptionsJson: JSON.stringify(options) }), { ...machine, options });
+  expectModel(await start(f.configPath, { modelOptions: [] }), { ...machine, options: [] });
+  const result = await start(f.configPath, { provider: "claude-work", model: "claude-opus-5-5", modelOptions: [{ id: "effort", value: "xhigh" }], dryRun: false });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const expected = { instanceId: "claude-work", model: "claude-opus-5-5", options: [{ id: "effort", value: "xhigh" }] };
+  assert.deepEqual(f.commands[0]?.modelSelection, expected);
+  assert.deepEqual(f.commands[0]?.bootstrap.createThread.modelSelection, expected);
+  expectModel(await start(f.configPath), machine);
+});
+
+test("invalid or ambiguous model options fail before dispatch", async t => {
+  const f = await fixture(t);
+  for (const options of [
+    { modelOptions: [], modelOptionsJson: "[]" },
+    ...["{", "null", "{}", '[{"id":"effort","value":null}]', '[{"id":"effort","value":"high"},{"id":"effort","value":"xhigh"}]'].map(modelOptionsJson => ({ modelOptionsJson })),
+  ]) {
+    const result = await start(f.configPath, { ...options, dryRun: false });
+    assert.equal(result.ok, false, JSON.stringify(options));
+  }
+  assert.equal(f.commands.length, 0);
+});
+
 test("start inherits machine and project models with all options from one settings snapshot", async t => {
   const f = await fixture(t);
   f.projects[0]!.defaultModelSelection = null;

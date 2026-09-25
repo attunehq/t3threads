@@ -4,6 +4,7 @@ import { addWatch, cancelWatch, deterministic, tick, runtime, type Observation, 
 import { State } from "../src/state.js";
 import { sendCommand } from "../src/threads.js";
 import { fixture, thread } from "./fixture.js";
+import { stopProcess } from "./process.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
@@ -85,15 +86,7 @@ test("a CLI-created watcher outlives its caller process and emits an event", { t
   // Hooks run in registration order: stop the worker before the fixture removes its files on Windows.
   t.after(async () => {
     const pid = workerPid ?? state?.get<{ pid: number }>("worker", "lease")?.pid;
-    if (!pid) return;
-    const running = () => {
-      try { process.kill(pid, 0); return true; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return false; throw error; }
-    };
-    if (running()) { try { process.kill(pid, "SIGTERM"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; } }
-    const deadline = Date.now() + 5_000;
-    while (running() && Date.now() < deadline) await delay(50);
-    assert.equal(running(), false, "the detached worker must exit before its files are removed");
+    if (pid) await stopProcess(pid);
   });
   const f = await fixture(t);
   state = new State(f.dir + "/worker-state");

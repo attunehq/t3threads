@@ -270,6 +270,10 @@ do (for example, push or open PRs).
 - `--model MODEL` overrides the model within the inherited provider. Changing
   the model clears inherited model options; keeping the same model preserves
   them. `--provider INSTANCE --model MODEL` selects both explicitly.
+- `--model-options-json` replaces the selected model's options with a JSON array,
+  for example `'[{"id":"reasoningEffort","value":"xhigh"}]'` for Codex.
+  MCP/API accepts `modelOptions` as an array. Omit to inherit; `[]` clears options.
+  Use option IDs and values supported by the selected provider and model; inspect the dry run.
 - New threads inherit T3's permission setting for the destination project on
   the destination machine. If the project has no override, they use that
   machine's default. This applies to local, direct, and T3 Connect environments;
