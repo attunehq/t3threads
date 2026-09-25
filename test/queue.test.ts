@@ -9,6 +9,7 @@ import { State } from "../src/state.js";
 import { sendCommand } from "../src/threads.js";
 import { CliError } from "../src/client.js";
 import { fixture, thread } from "./fixture.js";
+import { stopProcess } from "./process.js";
 
 const input = (config: string, text = "Continue", ref = "local:t1") => ({
   ref, environmentId: "test-env", options: { config }, command: sendCommand(thread, text),
@@ -143,20 +144,9 @@ test("queued delivery resolves a remote recipient independently of the local wor
 test("CLI enqueue outlives the sending process, exposes status, and supports cancellation and dry run", { timeout: 20_000 }, async t => {
   let state: State | undefined, workerPid: number | undefined;
   t.after(async () => {
-    const leasePid = state?.get<{ pid: number }>("worker", "lease")?.pid;
     // A drained worker releases its lease before exiting and can still reopen the database.
-    const pid = workerPid ?? leasePid;
-    if (!pid) return;
-    const running = () => {
-      try { process.kill(pid, 0); return true; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return false; throw error; }
-    };
-    if (leasePid === pid) {
-      try { process.kill(pid, "SIGTERM"); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
-    }
-    const deadline = Date.now() + 5000;
-    while (running() && Date.now() < deadline) await delay(50);
-    assert.equal(running(), false, "the detached worker must exit before its files are removed");
+    const pid = workerPid ?? state?.get<{ pid: number }>("worker", "lease")?.pid;
+    if (pid) await stopProcess(pid);
   });
   const f = await fixture(t);
   state = new State(f.dir + "/worker-state");
