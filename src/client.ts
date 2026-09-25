@@ -89,6 +89,11 @@ export async function invocation(target: Target): Promise<{ command: string[]; e
   const candidates: { command: string[]; env: NodeJS.ProcessEnv }[] = [];
   if (target.config.command) candidates.push({ command: target.config.command, env: process.env });
   else {
+    // The boot service can update independently of both the desktop app and PATH.
+    if (target.home && /^[a-zA-Z0-9][a-zA-Z0-9._+-]*$/.test(target.descriptor.serverVersion)) {
+      const binary = join(target.home, "runtime/versions", target.descriptor.serverVersion, process.platform === "win32" ? "t3.exe" : "t3");
+      if (await exists(binary)) candidates.push({ command: [binary], env: process.env });
+    }
     if (process.platform === "darwin") {
       for (const name of ["T3 Code (Nightly)", "T3 Code"]) {
         for (const apps of ["/Applications", join(homedir(), "Applications")]) {
@@ -108,8 +113,8 @@ export async function invocation(target: Target): Promise<{ command: string[]; e
 }
 
 export class Api {
-  constructor(public target: Target, private token: string, private signal?: AbortSignal, private authorization?: (method: string, url: string) => Promise<Record<string, string>>) {}
-  async request<T = unknown>(path: string, body?: unknown): Promise<T> {
+  constructor(public target: Target, private token: string, private signal?: AbortSignal, private authorization?: (method: string, url: string) => Promise<Record<string, string>>, private renewAuthorization?: () => Promise<void>) {}
+  async request<T = unknown>(path: string, body?: unknown, renewed = false): Promise<T> {
     let response: Response;
     try {
       response = await fetch(`${this.target.origin}${path}`, {
@@ -121,6 +126,11 @@ export class Api {
     } catch (error) {
       if (error instanceof CliError) throw error;
       return fail("REQUEST_FAILED", body === undefined ? "T3 request failed or was cancelled." : "Dispatch outcome is unknown. Inspect the thread before retrying; the command may have been accepted.");
+    }
+    // A rejected credential cannot have dispatched a command. Renew once, before retrying.
+    if (response.status === 401 && this.renewAuthorization && !renewed) {
+      await this.renewAuthorization();
+      return this.request<T>(path, body, true);
     }
     // Do not echo server errors: they can contain prompts, paths, or credentials.
     if (!response.ok) fail("HTTP_ERROR", `T3 returned HTTP ${response.status}.`, { status: response.status });

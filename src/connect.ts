@@ -84,13 +84,13 @@ export async function connectApi(target: Target, signal?: AbortSignal, state = n
     session = token(granted.data);
     state.put("connect-session", sessionKey, session);
   }
-  const ensureSession = () => state.lock(`session-${sessionKey}`, async () => {
+  const ensureSession = (rejectedToken?: string) => state.lock(`session-${sessionKey}`, async () => {
     session = state.get<OAuth>("connect-session", sessionKey);
-    if (!session || session.expiresAt < Date.now() + 30_000) await renew();
+    if (!session || session.expiresAt < Date.now() + 30_000 || session.accessToken === rejectedToken) await renew();
   }, signal);
   await ensureSession();
   return new Api(target, "", signal, async (method, url) => {
     if (!session || session.expiresAt < Date.now() + 30_000) await ensureSession();
     return { authorization: `DPoP ${session!.accessToken}`, dpop: key.proof(method, url, session!.accessToken) };
-  });
+  }, () => ensureSession(session?.accessToken));
 }

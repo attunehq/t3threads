@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createCipheriv, pbkdf2Sync } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { decryptSafeStorage, nativeRelayToken, nativeSignedIn } from "../src/native-auth.js";
+import { State } from "../src/state.js";
 import { fixture } from "./fixture.js";
 
 test("Safe Storage adapter decodes the native macOS v10 envelope and rejects unknown formats", () => {
@@ -25,17 +26,17 @@ test("native auth reuses T3's active account without GUI, separate login, or cac
     return Response.json({ response: { last_active_session_id: "grace", sessions: [{ id: "ada", status: "active" }, { id: "grace", status: "active" }] } });
   });
   assert.equal(await nativeSignedIn({ home: f.dir }), true);
-  assert.equal(await nativeRelayToken({ home: f.dir }), "native-relay-jwt");
+  assert.equal(await nativeRelayToken({ home: f.dir }, undefined, new State(f.dir + "/state")), "native-relay-jwt");
   assert.ok(requests[1]!.includes("/sessions/grace/tokens/t3-relay"));
   assert.equal(await readFile(path, "utf8"), original);
   await writeFile(path, "{}");
   assert.equal(await nativeSignedIn({ home: f.dir }), false);
-  await assert.rejects(nativeRelayToken({ home: f.dir }), { code: "T3_SIGN_IN_REQUIRED" });
+  await assert.rejects(nativeRelayToken({ home: f.dir }, undefined, new State(f.dir + "/state")), { code: "T3_SIGN_IN_REQUIRED" });
 });
 
 test("native auth requires a running local T3 server even when saved credentials exist", async t => {
   const f = await fixture(t);
   await writeFile(f.dir + "/userdata/clerk-tokens.json", JSON.stringify({ __clerk_client_jwt: "raw:token" }));
   await writeFile(f.dir + "/userdata/server-runtime.json", JSON.stringify({ origin: "http://127.0.0.1:1" }));
-  await assert.rejects(nativeRelayToken({ home: f.dir }), { code: "SERVER_UNREACHABLE" });
+  await assert.rejects(nativeRelayToken({ home: f.dir }, undefined, new State(f.dir + "/state")), { code: "SERVER_UNREACHABLE" });
 });

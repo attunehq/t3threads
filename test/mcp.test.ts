@@ -4,11 +4,14 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { once } from "node:events";
 import { fixture } from "./fixture.js";
+import { State } from "../src/state.js";
+import { tickQueue } from "../src/queue.js";
 import { createCli } from "../src/cli.js";
 
 test("stdio MCP advertises schemas and runs the same read and write commands", { timeout: 20_000 }, async t => {
-  const f = await fixture(t);
-  const child = spawn(process.execPath, ["--import", "tsx", "src/bin.ts", "--mcp"], { stdio: ["pipe", "pipe", "pipe"] });
+  const f = await fixture(t), state = new State(f.dir + "/state");
+  state.put("worker", "lease", { owner: "test", pid: process.pid });
+  const child = spawn(process.execPath, ["--import", "tsx", "src/bin.ts", "--mcp"], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, T3THREADS_STATE_DIR: state.directory } });
   const pending = new Map<number, (value: any) => void>();
   let nextID = 1, stderr = "";
   child.stderr.on("data", data => { stderr += String(data); });
@@ -69,6 +72,8 @@ test("stdio MCP advertises schemas and runs the same read and write commands", {
   assert.equal(f.commands.length, 1);
   const sent = await call("tools/call", { name: "send", arguments: { config: f.configPath, thread: f.commands[0]!.threadId, caller: "local:t1", prompt: "Check the tests." } });
   assert.ok(!sent.result.isError, JSON.stringify(sent));
+  assert.match(JSON.stringify(sent.result), /queued/);
+  await tickQueue(state);
   assert.equal(f.commands.length, 2);
   assert.match(f.commands[1]!.message.text, /Sender thread: local:t1/);
   assert.match(f.commands[1]!.message.text, /from another agent, not the user/);
@@ -76,6 +81,7 @@ test("stdio MCP advertises schemas and runs the same read and write commands", {
   f.stored.get("t1")!.latestTurn = { state: "running" };
   const steered = await call("tools/call", { name: "send", arguments: { config: f.configPath, thread: "t1", caller: "local:t1", prompt: "Continue now.", steer: true } });
   assert.ok(!steered.result.isError, JSON.stringify(steered));
+  await tickQueue(state);
   assert.equal(f.commands.length, 3);
   const external = await call("tools/call", { name: "send", arguments: { config: f.configPath, thread: "t1", externalCaller: "jessbot", prompt: "Ada sent a Slack follow-up.", steer: true } });
   assert.ok(!external.result.isError, JSON.stringify(external));

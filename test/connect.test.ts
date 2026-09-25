@@ -53,3 +53,27 @@ test("Connect cannot substitute another host during credential exchange", async 
   await assert.rejects(connectApi({ ...f.target, origin: "https://environment.test", config: { connectId: "test-env", connect: { relayUrl: "https://relay.test" } } }, undefined, state, async () => cloudToken), { code: "CONNECT_IDENTITY_MISMATCH" });
 });
 
+
+test("Connect renews expired and rejected sessions once, persisting replacement credentials across restarts", async t => {
+  const f = await fixture(t), state = new State(f.dir + "/state");
+  const target = { ...f.target, home: undefined, origin: "https://environment.test", config: { connectId: f.target.descriptor.environmentId, connect: { relayUrl: "https://relay.test" } } };
+  let grants = 0, reject = false, reads = 0;
+  t.mock.method(globalThis, "fetch", async (url: string, init: RequestInit) => {
+    if (url.endsWith("/dpop-token")) return Response.json({ access_token: "relay", expires_in: 300, token_type: "DPoP", scope: "environment:connect" });
+    if (url.endsWith("/connect")) return Response.json({ environmentId: target.descriptor.environmentId, endpoint: { httpBaseUrl: target.origin }, credential: "bootstrap" });
+    if (url.endsWith("/oauth/token")) return Response.json({ access_token: `session-${++grants}`, expires_in: 3600, token_type: "DPoP" });
+    reads++;
+    const token = new Headers(init.headers).get("authorization");
+    return Response.json({ ok: true }, { status: reject || token === "DPoP session-2" ? 401 : 200 });
+  });
+  await (await connectApi(target, undefined, state, async () => cloudToken)).request("/api/read");
+  assert.equal(grants, 1);
+  state.transaction(db => db.exec("UPDATE entries SET value=json_set(value,'$.expiresAt',0) WHERE kind='connect-session'"));
+  const renewed = await connectApi(target, undefined, new State(state.directory), async () => cloudToken);
+  assert.deepEqual(await renewed.request("/api/read"), { ok: true });
+  assert.equal(grants, 3, "expired session is renewed, then rejected replacement is renewed once");
+  reject = true;
+  const before = reads;
+  await assert.rejects(renewed.request("/api/read"), { code: "HTTP_ERROR" });
+  assert.equal(reads - before, 2, "repeated rejection is surfaced without an infinite renewal loop");
+});

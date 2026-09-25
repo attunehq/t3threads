@@ -66,16 +66,19 @@ setting, report the error rather than guessing a mode. Check
 `command.runtimeMode` and `command.bootstrap.createThread.runtimeMode` in the
 dry run. `mode: "plan"` controls interaction mode, not permissions.
 
-Use `send ENV:THREAD_ID --caller ENV:CALLER_ID --prompt TEXT` for an idle thread.
-Add `--steer` to send immediately during a turn (or start a turn if idle).
-Add `--enqueue` to persist a follow-up until the thread becomes idle. These
-flags are mutually exclusive; MCP uses `steer: true` or `enqueue: true`.
-Enqueue returns `status: queued` and a `queueId`. Use `queued` to inspect
-delivery or errors and `unqueue QUEUE_ID` to cancel before dispatch begins.
-The local background worker delivers in order per recipient and retries
-offline environments. On macOS, `service status` reports whether the background
-service keeps delivery running across logins and crashes.
-Do not create a retry loop or resend a message already in the durable queue.
+Use `send ENV:THREAD_ID --caller ENV:CALLER_ID --prompt TEXT` for durable
+thread-to-thread delivery. Every such send is saved before network access and
+returns `status: queued`, a `queueId`, and a stable `commandId`. Default delivery
+waits for idle. Add `--steer` to deliver during a turn; it is still durable.
+`--enqueue` explicitly selects default idle delivery and cannot combine with
+steer. MCP uses the same options. `--dry-run` contacts both servers for a preview
+but neither stores nor sends a message.
+Use `queued` to inspect delivery/errors and `unqueue QUEUE_ID` to cancel before
+dispatch begins. `accepted` means T3 acknowledged delivery, not task completion.
+The worker retries offline and temporary authentication failures and reuses the
+same command on uncertain delivery. Do not resend messages already queued.
+On macOS, install the background service on each sending machine to recover
+after crashes and logins; `service status` includes sign-in warm-up health.
 For a T3 caller, resolve your own thread with `list` using the current
 worktree, not a provider conversation ID. Bare caller IDs mean local regardless
 of the recipient's `--env`. Send prefixes the prompt with your thread title,
@@ -89,8 +92,9 @@ An integration outside T3 must use `--external-caller NAME` (`externalCaller`
 in MCP) instead of `--caller`. Exactly one caller option is required. Include
 the original request, source link, and reply instructions in the prompt. The
 external name is self-reported attribution, not verified user identity. Do not
-borrow another thread's identity. External sends support steer, enqueue, and
-dry-run with the same recipient settings and delivery semantics.
+borrow another thread's identity. External sends remain direct by default, returning an acceptance receipt for
+integrations that own delivery and Stop ordering. They support steer for busy
+threads, enqueue for durable idle delivery, and dry-run.
 
 `accepted` is a dispatch receipt, not task completion. Read the thread's
 `latestTurn`, `session`, and messages to check progress and failures. If a write fails, inspect its
@@ -127,7 +131,10 @@ Renaming needs `--title`; `--dry-run` previews the command.
 
 Run `doctor` for setup. T3 must be running; the GUI can be closed after a saved
 sign-in exists. Connect reuses T3's native macOS credential cache and Keychain
-read-only, with no separate login. Windows/Linux encrypted desktop credentials
+read-only, caching the decrypted client sign-in in its owner-only local state
+for renewal while locked, without storing the Safe Storage key or a separate
+login. Run `environments` once while the Keychain is accessible to warm it.
+Changed sign-ins may require another warm-up; sign-out invalidates the cache. Windows/Linux encrypted desktop credentials
 are not supported yet; named direct sessions work there. Do not manually copy
 cloud credentials or read/edit T3's database to work around an error.
 

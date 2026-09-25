@@ -14,6 +14,7 @@ export class State {
   constructor(readonly directory = statePath()) {}
   transaction<T>(fn: (db: DatabaseSync) => T): T {
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
+    chmodSync(this.directory, 0o700);
     const path = join(this.directory, "state.sqlite");
     const db = new DatabaseSync(path);
     try {

@@ -28,7 +28,7 @@ test("queue survives restart, waits for idle, and preserves recipient settings a
   await tickQueue(new State(state.directory), queueDelivery(), 6000);
   assert.equal(state.get<QueuedMessage>("message", queued.id)?.status, "accepted");
   assert.equal(f.commands.length, 1);
-  assert.equal(f.commands[0]!.commandId, queued.command.commandId);
+  assert.equal(f.commands[0]!.commandId, queued.commandId);
   assert.equal(f.commands[0]!.interactionMode, "default");
   assert.equal(f.commands[0]!.modelSelection.model, "changed-model");
   await tickQueue(state, queueDelivery(), 12000);
@@ -85,14 +85,14 @@ test("cancel before dispatch wins the claim; dispatching messages cannot be reca
   let sent = false;
   await tickQueue(state, async (message, claim) => {
     cancelMessage(message.id, state);
-    if (!claim(message.command)) return "cancelled";
+    if (!claim(message.command!)) return "cancelled";
     sent = true; return "accepted";
   });
   assert.equal(sent, false);
   assert.equal(state.get<QueuedMessage>("message", queued.id)?.status, "cancelled");
   const another = enqueue(input(f.configPath), state);
   await tickQueue(state, async (message, claim) => {
-    assert.equal(claim(message.command), true);
+    assert.equal(claim(message.command!), true);
     assert.throws(() => cancelMessage(message.id, state), { code: "DELIVERY_STARTED" });
     throw new CliError("DISPATCH_UNKNOWN", "lost receipt");
   });

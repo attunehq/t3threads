@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { exists, fail, run } from "./client.js";
-import { statePath } from "./state.js";
+import { State, statePath } from "./state.js";
 
 const label = "com.attune.t3threads";
 type CommandRunner = typeof run;
@@ -60,6 +60,7 @@ export async function service(action: "install" | "start" | "restart" | "status"
       running: result.status === 0 && /^\s*state = running\s*$/m.test(result.stdout),
       pid: Number(result.stdout.match(/^\s*pid = (\d+)\s*$/m)?.[1]) || null,
       path,
+      connection: new State(options.stateDirectory).get("connection-health", "native") ?? null,
     };
   };
   if (action === "status") return status();

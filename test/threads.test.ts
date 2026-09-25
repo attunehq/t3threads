@@ -3,8 +3,21 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { Api, discover, exists, withApi } from "../src/client.js";
 import { catalog, readAll, readThread, search, selectProject, selection, sendCommand, dispatch, startCommand } from "../src/threads.js";
+import { State } from "../src/state.js";
+import { tickQueue, type QueuedMessage } from "../src/queue.js";
+import type { TestContext } from "node:test";
 import { createCli } from "../src/cli.js";
 import { fixture, json, message, project, thread } from "./fixture.js";
+
+function queueState(t: TestContext, directory: string) {
+  const prior = process.env.T3THREADS_STATE_DIR;
+  process.env.T3THREADS_STATE_DIR = directory + "/state";
+  t.after(() => { if (prior === undefined) delete process.env.T3THREADS_STATE_DIR; else process.env.T3THREADS_STATE_DIR = prior; });
+  const state = new State();
+  // These tests drive delivery explicitly; the real detached process is covered in queue.test.ts.
+  state.put("worker", "lease", { owner: "test", pid: process.pid });
+  return state;
+}
 
 test("history pagination finds old messages and deduplicates page overlap", async t => {
   const f = await fixture(t, (req, res) => {
@@ -67,13 +80,13 @@ test("explicit steering accepts every busy state and idle threads but still reje
 });
 
 test("send steering and enqueue previews share validation and attribution through Fetch", async t => {
-  const f = await fixture(t), cli = createCli();
+  const f = await fixture(t), cli = createCli(), state = queueState(t, f.dir);
   f.stored.get("t1")!.latestTurn = { state: "running" };
   const call = async (extra: object) => (await cli.fetch(new Request("http://cli/send/t1", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ config: f.configPath, caller: "local:t1", prompt: "Continue", ...extra }),
   }))).json() as Promise<any>;
-  assert.equal((await call({})).error.code, "THREAD_BUSY");
+  assert.equal((await call({ dryRun: true })).ok, true);
   assert.equal((await call({ steer: true, enqueue: true })).error.code, "INVALID_ARGUMENT");
   assert.equal((await call({ steer: true, prompt: " " })).error.code, "PROMPT_REQUIRED");
   for (const mode of ["steer", "enqueue"]) {
@@ -83,11 +96,15 @@ test("send steering and enqueue previews share validation and attribution throug
     assert.equal(f.commands.length, 0);
   }
   const sent = await call({ steer: true });
-  assert.equal(sent.data.status, "accepted");
+  assert.equal(sent.data.status, "queued");
+  await tickQueue(state);
+  assert.equal(state.get<QueuedMessage>("message", sent.data.queueId)?.status, "accepted");
   assert.equal(f.commands.length, 1);
   assert.equal(f.stored.get("t1")!.latestTurn?.state, "running");
   f.stored.get("t1")!.archivedAt = "today";
-  assert.equal((await call({ enqueue: true })).error.code, "THREAD_INACTIVE");
+  const inactive = await call({ enqueue: true });
+  await tickQueue(state);
+  assert.equal(state.get<QueuedMessage>("message", inactive.data.queueId)?.error?.code, "THREAD_INACTIVE");
 });
 
 test("external callers steer with attribution and source context without a sender thread", async t => {
@@ -161,7 +178,7 @@ test("HTTP redirects never forward the credential", async t => {
 });
 
 test("Fetch API shares CLI validation and executes start/read/send through RPC", async t => {
-  const f = await fixture(t); const cli = createCli();
+  const f = await fixture(t); const cli = createCli(), state = queueState(t, f.dir);
   const call = async (path: string, options: Record<string, unknown> = {}, method = "POST") => {
     const query = new URLSearchParams({ config: f.configPath });
     if (method === "GET") for (const [key, value] of Object.entries(options)) query.set(key, String(value));
@@ -183,7 +200,7 @@ test("Fetch API shares CLI validation and executes start/read/send through RPC",
   assert.equal(read.data.messages[0].text, "Implement");
   assert.equal((await call(`send/${id}`, { prompt: "Test it" })).ok, false);
   assert.equal((await call(`send/${id}`, { prompt: "Test it", caller: "all:t1" })).ok, false);
-  assert.equal((await call(`send/${id}`, { prompt: "Test it", caller: "local:missing" })).ok, false);
+  assert.equal((await call(`send/${id}`, { prompt: "Test it", caller: "local:missing", dryRun: true })).ok, false);
   assert.equal(f.commands.length, 1);
   f.stored.get("t1")!.latestTurn = { state: "running" };
   const promptFile = `${f.dir}/prompt.txt`;
@@ -199,6 +216,7 @@ test("Fetch API shares CLI validation and executes start/read/send through RPC",
   assert.match(preview.data.command.message.text, /target local:t1 and --caller/);
   assert.ok(preview.data.command.message.text.endsWith("\n\nTest it\nKeep the details.\n"));
   assert.equal((await call(`send/${id}`, sendOptions)).ok, true);
+  await tickQueue(state);
   assert.equal(f.commands[1]?.message.text, preview.data.command.message.text);
   assert.equal(f.commands[1]?.runtimeMode, "approval-required");
   assert.equal(f.commands[1]?.interactionMode, "plan");
@@ -215,12 +233,13 @@ test("send resolves caller independently of recipient environment and provides a
     local: { home: sender.dir, command: sender.target.config.command },
     remote: { url: recipient.target.origin, tokenEnv: key },
   } }));
-  const cli = createCli();
+  const cli = createCli(), state = queueState(t, sender.dir);
   const response = await cli.fetch(new Request("http://cli/send/t1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
     config: sender.configPath, env: "remote", caller: "t1", prompt: "Review the analysis.",
   }) }));
   const result = await response.json() as { ok: boolean };
   assert.equal(result.ok, true, JSON.stringify(result));
+  await tickQueue(state);
   assert.equal(sender.commands.length, 0);
   assert.equal(recipient.commands.length, 1);
   const text = recipient.commands[0]!.message.text;
