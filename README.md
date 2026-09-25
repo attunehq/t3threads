@@ -102,7 +102,7 @@ your saved sign-in. Here is what it uses:
 | T3's runtime metadata in `~/.t3/userdata/server-runtime.json` | Find the running local server. It then uses T3's CLI to issue a temporary session. |
 | T3's saved sign-in in `~/.t3/userdata/clerk-tokens.json` and its macOS Safe Storage Keychain item | Unlock the existing sign-in and authenticate with T3's sign-in provider and Connect relay to reach your linked machines. |
 | Project metadata, thread messages and status, and model settings | Read and coordinate your work through T3's HTTP and WebSocket APIs. t3threads never opens T3's database or changes its credential files. |
-| Its own [local state directory](#your-data) | Store cached thread text, model results, queued messages, watchers, and per-machine connection credentials and keys. |
+| Its own [local state directory](#your-data) | Store cached thread text, model results, queued messages, watchers, and per-machine connection credentials, keys, and a cached T3 client sign-in for unattended renewal. |
 
 The T3 paths above use the default home; custom T3 homes use their corresponding
 files. Reading threads through MCP makes their contents available to your agent.
@@ -312,17 +312,23 @@ t3threads send local:THREAD_ID --caller local:MY_THREAD_ID --enqueue \
   --prompt 'When this turn finishes, run the integration tests.'
 ```
 
-Choose how the message arrives:
+Thread-to-thread sends persist in the local outbox before either server is
+contacted. They return `status: queued`, a `queueId`, and a stable `commandId`.
+This confirms local storage, not delivery. Use `queued` to check acceptance or
+errors; do not resend a queued message.
 
-- Plain `send` delivers to an idle thread. It fails if the thread is busy.
-- `--steer` delivers now. If a turn is running, the agent receives the message
-  during that turn, when its provider allows. If the thread is idle, a new turn
-  starts.
-- `--enqueue` waits until the thread is idle, then delivers. Messages to the same
-  thread arrive in the order you queued them. If the recipient's machine is
-  offline, t3threads keeps trying. If the recipient was deleted or archived, the
-  message shows as `failed`. Use `queued` to check messages and
-  `unqueue QUEUE_ID` to cancel one before it is sent.
+- Plain `send` waits for the recipient to be idle.
+- `--steer` delivers during a running turn, or starts an idle thread. It also
+  survives an offline recipient, locked Mac, or worker restart.
+- `--enqueue` explicitly requests the default wait-for-idle behavior. It cannot
+  be combined with `--steer`.
+
+The worker retries temporary authentication and connection failures. Messages
+arrive in order per recipient. A deleted, archived, or missing thread fails
+visibly in `queued`. Use `unqueue QUEUE_ID` to cancel before dispatch starts.
+After dispatch starts, recovery reuses the frozen command and message IDs so
+T3 can deduplicate a lost receipt. `--dry-run` requires reachable servers and
+previews the command without saving or delivering it.
 
 The recipient keeps its own model and settings.
 
@@ -342,7 +348,10 @@ Supply exactly one caller option. External messages identify the integration
 without inventing a T3 sender thread. Include the original request, its source
 link, and instructions for replying in the prompt. The caller name is a label
 supplied by the integration, not a verified user identity. External callers can
-also use `--enqueue` and `--dry-run`.
+use direct delivery by default: success means `accepted`, and a busy thread
+requires `--steer`. This preserves receipt and Stop ordering for integrations
+such as jessbot that already own their outgoing lifecycle. External callers can
+use `--enqueue` for durable delivery and `--dry-run` for a preview.
 
 Queued messages survive restarts and crashes, and a retry after a crash does not
 deliver a message twice. The machine that queued a message must stay on until
@@ -444,9 +453,22 @@ If you are signed in to T3 Connect in the T3 desktop app, t3threads finds your
 other machines automatically. Run `t3threads environments` to see them. Each one
 is named `connect-ENVIRONMENT_ID`.
 
-t3threads reads T3's saved sign-in and never changes it. If you sign out of T3,
-t3threads loses access too. Sign in through the desktop app at least once;
-headless sign-in does not work. Every machine you want to reach must be running
+t3threads reads T3's saved sign-in and never changes it. Once after signing in,
+run `t3threads environments` while the login Keychain is accessible and allow
+the Safe Storage request. t3threads caches the decrypted client sign-in in its
+own owner-only state directory (0700, database 0600). It does not save the
+Keychain password or Safe Storage encryption key. This credential lets it mint
+fresh relay tokens and renew environment sessions while the Mac is locked,
+including after a worker restart. The credential is sensitive; protect this
+state directory like the T3 sign-in itself.
+
+The background service checks for changed sign-in data once a minute so it can
+warm the cache while access is available. `service status` shows the latest
+warm-up error. A changed or removed T3 sign-in invalidates the cached credential;
+a new sign-in may require one unlocked warm-up. Server-side revocation and
+expired logins still require signing in again. Queued messages remain pending
+through temporary authentication failures. Sign in through the desktop app at
+least once; headless sign-in does not work. Every machine you want to reach must be running
 T3.
 
 ### Direct connections and other T3 data directories
@@ -562,9 +584,13 @@ keep it on your machine or add your own authentication before you expose it.
 - `complete: false` means that a machine was unreachable or a limit was reached.
   Check `errors` and the reported coverage.
 - `MATCHING_CLI_REQUIRED` means that t3threads needs a `t3` command with the same
-  version as the running T3 server. On macOS, it uses the one inside the T3 app.
-  Elsewhere, install the matching `t3` CLI, or set `command` for that
-  environment in the configuration file.
+  version as the running T3 server. It first checks that home's
+  `runtime/versions/SERVER_VERSION/t3` (`t3.exe` on Windows), then the macOS
+  desktop bundles and PATH. An explicit environment `command` overrides
+  discovery. Every candidate must report the exact server version.
+- `NATIVE_AUTH_LOCKED` means the current sign-in has not been cached yet. Run
+  `t3threads environments` once with the login Keychain unlocked; the service
+  retries cache warm-up, and queued messages retry delivery automatically.
 - `UNSUPPORTED_SERVER` means that your T3 version is too old. Update T3.
 - If your agent does not see the t3threads tools, start a new thread or restart
   the provider session.

@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createDecipheriv, pbkdf2Sync } from "node:crypto";
 import { discover, exists, expand, fail, object, type ConnectConfig } from "./client.js";
+import { State, digest } from "./state.js";
 
 const exec = promisify(execFile);
 export const nativeHome = (config: ConnectConfig = {}) => expand(config.home ?? process.env.T3CODE_HOME ?? "~/.t3");
@@ -24,14 +25,28 @@ export function decryptSafeStorage(encoded: string, password: string) {
     return Buffer.concat([decipher.update(encrypted.subarray(3)), decipher.final()]).toString("utf8");
   } finally { key.fill(0); }
 }
-async function clientToken(config: ConnectConfig) {
+export async function nativeClientToken(config: ConnectConfig = {}, state = new State(), unlock = unlockClientToken) {
   const home = nativeHome(config);
   await discover("local", { home });
+  const cacheKey = digest(home);
   let stored: unknown;
   try { stored = object(JSON.parse(await readFile(join(home, "userdata/clerk-tokens.json"), "utf8"))).__clerk_client_jwt; }
-  catch { return fail("T3_SIGN_IN_REQUIRED", "Sign in to T3 Connect in the running T3 desktop app."); }
-  if (typeof stored !== "string" || !stored) fail("T3_SIGN_IN_REQUIRED", "Sign in to T3 Connect in the running T3 desktop app.");
-  if (stored.startsWith("raw:")) return stored.slice(4);
+  catch { stored = undefined; }
+  const cached = state.get<{ fingerprint: string; token: string }>("native-client", cacheKey);
+  if (typeof stored !== "string" || !stored) {
+    state.remove("native-client", cacheKey);
+    fail("T3_SIGN_IN_REQUIRED", "Sign in to T3 Connect in the running T3 desktop app.");
+  }
+  const fingerprint = digest(stored);
+  if (cached?.fingerprint === fingerprint) return cached.token;
+  // Never reuse another account's credential after T3 changes or removes its cache.
+  state.remove("native-client", cacheKey);
+  const token = stored.startsWith("raw:") ? stored.slice(4) : await unlock(stored);
+  if (!token) fail("NATIVE_AUTH_FORMAT", "T3's Clerk client credential is empty.");
+  state.put("native-client", cacheKey, { fingerprint, token });
+  return token;
+}
+async function unlockClientToken(stored: string) {
   if (!stored.startsWith("enc:")) fail("NATIVE_AUTH_FORMAT", "T3's Clerk storage format is not supported.");
   if (process.platform !== "darwin") fail("NATIVE_AUTH_UNSUPPORTED", "This build can read the T3 desktop Safe Storage cache on macOS. Windows/Linux native keyring adapters are not implemented.");
   // Names follow Electron's app identity; t3code is the legacy identity retained by existing installs.
@@ -42,10 +57,10 @@ async function clientToken(config: ConnectConfig) {
       if (value) return value;
     } catch { /* Try only known T3 app identities; never return credential-bearing command errors. */ }
   }
-  return fail("NATIVE_AUTH_LOCKED", "Cannot unlock T3's Safe Storage cache. Unlock the login Keychain and allow access to T3's Safe Storage item.");
+  return fail("NATIVE_AUTH_LOCKED", "The T3 sign-in has not been cached for unattended use. Once after sign-in, run t3threads environments with the login Keychain unlocked and allow access to T3's Safe Storage item. Queued messages will retry automatically.");
 }
-export async function nativeRelayToken(config: ConnectConfig = {}, signal?: AbortSignal): Promise<string> {
-  const token = await clientToken(config);
+export async function nativeRelayToken(config: ConnectConfig = {}, signal?: AbortSignal, state = new State(), unlock = unlockClientToken): Promise<string> {
+  const token = await nativeClientToken(config, state, unlock);
   const issuer = config.issuerUrl ?? "https://clerk.t3.codes";
   if (new URL(issuer).protocol !== "https:") fail("INVALID_CONFIG", "Clerk native authentication requires HTTPS.");
   const headers = { authorization: `Bearer ${token}` };

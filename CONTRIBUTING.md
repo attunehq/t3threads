@@ -92,8 +92,10 @@ explicit model starts without the previous model's options.
 
 ### Local authentication
 
-On macOS, t3threads finds the `t3` executable inside T3's desktop app. Elsewhere
-it uses `t3` on `PATH`. The executable's version must match the server version
+t3threads first checks the selected T3 home's managed runtime directory for the
+server's exact version, then macOS desktop bundles and `t3` on `PATH`. This
+handles boot-service updates that leave the app and PATH on different builds.
+An explicit `command` remains authoritative. The executable's version must match the server version
 exactly. t3threads then runs T3's `auth session issue`, keeps the bearer token in
 memory, and revokes it in a `finally` block. A forced kill can leave the session
 open until it expires after one hour.
@@ -105,9 +107,13 @@ t3threads never opens T3's SQLite database.
 The native adapter is read-only. It opens T3's encrypted Clerk cache with the
 existing Keychain Safe Storage key, asks Clerk for the same `t3-relay` session
 JWT that the T3 client uses, and follows T3's DPoP connection protocol. It never
-changes T3's credential files and never stores a second cloud login.
+changes T3's credential files. It caches the decrypted client credential in
+its own private state, keyed by home and the saved credential's fingerprint.
+The cache survives a locked Keychain and process restarts, but is not reused
+when the T3 cache changes or disappears. It never persists the Safe Storage
+key. The service warms this cache every minute; relay JWTs are minted on demand.
 Per-environment session credentials and DPoP keys live in t3threads' state and
-are renewed through the same account. A sign-out in T3 takes effect on the next
+are renewed through the same account. A rejected environment credential is renewed once under the shared session lock before retrying the HTTP request. A sign-out in T3 takes effect on the next
 connection.
 
 Headless OAuth sign-in cannot yet bootstrap a relay client session. Windows and
@@ -141,8 +147,14 @@ process delivers at a time. Before dispatch, the worker persists a stable comman
 ID. After a crash or lost response, it reuses that ID so T3's command receipts
 deduplicate the retry.
 
+Thread callers save the request, reply reference, and stable command/message
+IDs before network access. The worker resolves sender attribution and recipient
+settings, pins the destination environment, then saves the exact command before
+dispatch. Pending requests survive authentication failures; a dispatching
+request never needs the sender again. External callers retain direct delivery
+unless they request enqueue, preserving receipt-based lifecycle integrations.
 Queued messages are delivered in enqueue order per recipient, including
-environment aliases. The idle check and the dispatch are separate operations, so
+environment aliases once their identity has been resolved. The idle check and the dispatch are separate operations, so
 another client can start a turn between them.
 
 Semantic watcher conditions evaluate cached recent text with a 100,000-character
