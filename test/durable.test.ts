@@ -59,8 +59,9 @@ test("fresh relay tokens can be minted from a cached encrypted sign-in without u
     if (url.includes("/tokens/")) return Response.json({ jwt: `renewed-${++tokens}` });
     return Response.json({ response: { last_active_session_id: "ada", sessions: [{ id: "ada", status: "active" }] } });
   });
-  assert.equal(await nativeRelayToken({ home: f.dir }, undefined, new State(state.directory)), "renewed-1");
-  assert.equal(await nativeRelayToken({ home: f.dir }, undefined, new State(state.directory)), "renewed-2");
+  const locked = async () => { throw new CliError("NATIVE_AUTH_LOCKED", "fixture Keychain is locked"); };
+  assert.equal(await nativeRelayToken({ home: f.dir }, undefined, new State(state.directory), locked), "renewed-1");
+  assert.equal(await nativeRelayToken({ home: f.dir }, undefined, new State(state.directory), locked), "renewed-2");
 });
 
 test("send persists through Fetch before any server is reachable, then delivers after restart with stable IDs", async t => {

@@ -59,8 +59,8 @@ async function unlockClientToken(stored: string) {
   }
   return fail("NATIVE_AUTH_LOCKED", "The T3 sign-in has not been cached for unattended use. Once after sign-in, run t3threads environments with the login Keychain unlocked and allow access to T3's Safe Storage item. Queued messages will retry automatically.");
 }
-export async function nativeRelayToken(config: ConnectConfig = {}, signal?: AbortSignal, state = new State()): Promise<string> {
-  const token = await nativeClientToken(config, state);
+export async function nativeRelayToken(config: ConnectConfig = {}, signal?: AbortSignal, state = new State(), unlock = unlockClientToken): Promise<string> {
+  const token = await nativeClientToken(config, state, unlock);
   const issuer = config.issuerUrl ?? "https://clerk.t3.codes";
   if (new URL(issuer).protocol !== "https:") fail("INVALID_CONFIG", "Clerk native authentication requires HTTPS.");
   const headers = { authorization: `Bearer ${token}` };
