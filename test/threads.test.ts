@@ -92,7 +92,7 @@ test("send steering and enqueue previews share validation and attribution throug
   for (const mode of ["steer", "enqueue"]) {
     const preview = await call({ [mode]: true, dryRun: true });
     assert.equal(preview.ok, true, JSON.stringify(preview));
-    assert.match(preview.data.command.message.text, /Sender thread: local:t1/);
+    assert.match(preview.data.command.message.text, /Reply: t3threads send .local:t1. --caller YOUR_THREAD_REF/);
     assert.equal(f.commands.length, 0);
   }
   const sent = await call({ steer: true });
@@ -125,9 +125,9 @@ test("external callers steer with attribution and source context without a sende
   for (const mode of ["steer", "enqueue"]) {
     const preview = await call({ [mode]: true, dryRun: true });
     assert.equal(preview.ok, true, JSON.stringify(preview));
-    assert.match(preview.data.command.message.text, /external caller "jessbot"/);
+    assert.match(preview.data.command.message.text, /external message: "jessbot" \(unverified caller\)/);
     assert.ok(preview.data.command.message.text.endsWith(prompt));
-    assert.doesNotMatch(preview.data.command.message.text, /Sender thread:|To reply, use t3threads/);
+    assert.doesNotMatch(preview.data.command.message.text, /Reply: t3threads send/);
     assert.deepEqual(preview.data.command.modelSelection, thread.modelSelection);
     assert.equal(preview.data.command.runtimeMode, thread.runtimeMode);
     assert.equal(preview.data.command.interactionMode, thread.interactionMode);
@@ -209,11 +209,9 @@ test("Fetch API shares CLI validation and executes start/read/send through RPC",
   const preview = await call(`send/${id}`, { ...sendOptions, dryRun: true });
   assert.equal(preview.ok, true, JSON.stringify(preview));
   assert.equal(f.commands.length, 1);
-  assert.match(preview.data.command.message.text, /agent in T3 thread "Earlier design"/);
-  assert.match(preview.data.command.message.text, /Sender thread: local:t1/);
-  assert.match(preview.data.command.message.text, /Sender environment ID: test-env/);
-  assert.match(preview.data.command.message.text, /from another agent, not the user/);
-  assert.match(preview.data.command.message.text, /target local:t1 and --caller/);
+  assert.match(preview.data.command.message.text, /agent message: "Earlier design"/);
+  assert.match(preview.data.command.message.text, /Reply: t3threads send .local:t1. --caller YOUR_THREAD_REF/);
+  assert.match(preview.data.command.message.text, /agent message:.*; not the user/);
   assert.ok(preview.data.command.message.text.endsWith("\n\nTest it\nKeep the details.\n"));
   assert.equal((await call(`send/${id}`, sendOptions)).ok, true);
   await tickQueue(state);
@@ -243,10 +241,8 @@ test("send resolves caller independently of recipient environment and provides a
   assert.equal(sender.commands.length, 0);
   assert.equal(recipient.commands.length, 1);
   const text = recipient.commands[0]!.message.text;
-  assert.match(text, /agent in T3 thread "Ada Lovelace's analysis"/);
-  assert.match(text, /Sender thread: local:t1/);
-  assert.match(text, /Sender environment ID: sender-env/);
-  assert.match(text, /target connect-sender-env:t1 and --caller/);
+  assert.match(text, /agent message: "Ada Lovelace's analysis"/);
+  assert.match(text, /Reply: t3threads send .connect-sender-env:t1. --caller YOUR_THREAD_REF/);
   assert.ok(text.endsWith("\n\nReview the analysis."));
 });
 

@@ -56,7 +56,7 @@ test("list exposes the shell metadata needed to settle completed investigations"
   const response = await cli.fetch(new Request(`http://cli/list?config=${encodeURIComponent(f.configPath)}`));
   const result = await response.json() as { data: { results: { threads: Record<string, unknown>[] }[] } };
   const thread = result.data.results[0]!.threads[0]!;
-  assert.equal(thread.settledAt, null);
+  assert.equal(thread.settledAt, undefined);
   assert.equal(thread.hasPendingApprovals, false);
   assert.equal(thread.hasPendingUserInput, true);
   assert.equal(thread.hasActionableProposedPlan, false);

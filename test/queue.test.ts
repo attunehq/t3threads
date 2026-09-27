@@ -175,6 +175,6 @@ test("CLI enqueue outlives the sending process, exposes status, and supports can
   while (state.get<QueuedMessage>("message", first.queueId)?.status !== "accepted" && Date.now() < deadline) await delay(50);
   assert.equal(state.get<QueuedMessage>("message", first.queueId)?.status, "accepted");
   assert.equal(f.commands.length, 1);
-  assert.match(f.commands[0]!.message.text, /Sender thread: local:t1/);
+  assert.match(f.commands[0]!.message.text, /Reply: t3threads send .local:t1. --caller YOUR_THREAD_REF/);
   assert.match(f.commands[0]!.message.text, /1Password is available. Continue./);
 });

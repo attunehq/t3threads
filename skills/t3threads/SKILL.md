@@ -6,6 +6,12 @@ description: Discover, search, summarize, classify, watch, and manage T3 Code th
 Use `t3threads --help` and `t3threads <command> --schema` for command details.
 The CLI and MCP server expose the same commands and validation.
 
+`projects`, `list`, `read`, `queued`, and `watchers` return compact views.
+Request `--details` (`details: true` in MCP/API) only when you need full
+metadata or stored payloads; `--json` alone keeps compact fields. `read` retains
+all message text and roles in the requested page, plus attachment counts.
+Details adds message IDs/timestamps, attachments, and thread/session settings.
+
 Start with `overview` for cheap open-thread metadata across all machines. Inspect
 `complete` and `errors`: an offline host is unknown, never empty or finished.
 Use `find "work overlapping with ..."` for batched semantic relevance, then
@@ -73,18 +79,20 @@ waits for idle. Add `--steer` to deliver during a turn; it is still durable.
 `--enqueue` explicitly selects default idle delivery and cannot combine with
 steer. MCP uses the same options. `--dry-run` contacts both servers for a preview
 but neither stores nor sends a message.
-Use `queued` to inspect delivery/errors and `unqueue QUEUE_ID` to cancel before
+Use `queued --id QUEUE_ID` to inspect delivery/errors and `unqueue QUEUE_ID` to cancel before
 dispatch begins. `accepted` means T3 acknowledged delivery, not task completion.
+Add `--details` for prompts, command/message IDs, and stored dispatch payloads.
 The worker retries offline and temporary authentication failures and reuses the
 same command on uncertain delivery. Do not resend messages already queued.
 On macOS, install the background service on each sending machine to recover
 after crashes and logins; `service status` includes sign-in warm-up health.
 For a T3 caller, resolve your own thread with `list` using the current
 worktree, not a provider conversation ID. Bare caller IDs mean local regardless
-of the recipient's `--env`. Send prefixes the prompt with your thread title,
-reference, environment ID, and reply target, marking it as an agent message.
-To reply, send to that target with your own thread as caller; for direct-only
-connections, map the sender environment ID to your configured environment alias.
+of the recipient's `--env`. Send adds two lines: your thread title marked as an
+agent message (not the user), and a reply command. Replace `YOUR_THREAD_REF`
+with your own thread reference when replying. For direct-only connections,
+replace the reply target's `connect-ENV_ID` with your configured alias for that
+environment.
 Send keeps the recipient's model, permission, and interaction settings. In MCP,
 supply `caller` and `prompt`; stdin carries MCP protocol messages.
 
@@ -97,7 +105,8 @@ integrations that own delivery and Stop ordering. They support steer for busy
 threads, enqueue for durable idle delivery, and dry-run.
 
 `accepted` is a dispatch receipt, not task completion. Read the thread's
-`latestTurn`, `session`, and messages to check progress and failures. If a write fails, inspect its
+status, errors, and messages to check progress; use `read --details` for
+`latestTurn` and `session`. If a write fails, inspect its
 reported thread ID before retrying; it may already have been accepted.
 
 For authorized coordination, register a one-shot watcher:
@@ -115,7 +124,8 @@ Conditions are `all-completed`, `all-idle`, `any-error`, `changed`, `text`, or
 `jev`; the last two require `--prompt` describing the condition. Successful
 latest turns are not verified PR readiness. Watchers freeze an explicit set,
 survive CLI/MCP exit, poll every 30 seconds, and expire after 24 hours by default.
-`watchers` shows results/errors; `unwatch ID` cancels a watcher. Review notified
+`watchers` shows status/errors; `watchers --id ID --details` includes evidence
+and delivery metadata. `unwatch ID` cancels a watcher. Review notified
 evidence before merging or taking other consequential actions.
 
 `classify` accepts named Jev `noul`, `choice`, and `score` questions in `questions`

@@ -193,17 +193,12 @@ export function sendCommand(thread: Thread, prompt: string, sender?: { ref: stri
   if (thread.deletedAt || thread.archivedAt) fail("THREAD_INACTIVE", "Restore this thread in T3 before sending a prompt.");
   // T3 routes thread.turn.start to the running provider as steering input.
   if (delivery === "idle" && busy(thread)) fail("THREAD_BUSY", "The thread is running. Use --steer to send now or --enqueue to wait until it is idle.");
-  if (sender && "externalCaller" in sender) prompt = `[t3threads external message]
-From: external caller ${JSON.stringify(sender.externalCaller)}
-This message was relayed by an external integration, not a T3 thread. The caller name is supplied by the integration, not a verified user identity. Source context and reply instructions follow below.
+  if (sender && "externalCaller" in sender) prompt = `[t3threads external message: ${JSON.stringify(sender.externalCaller)} (unverified caller)]
+Source and reply instructions below.
 
 ${prompt}`;
-  else if (sender) prompt = `[t3threads agent message]
-From: agent in T3 thread ${JSON.stringify(sender.title)}
-Sender thread: ${sender.ref}
-Sender environment ID: ${sender.environmentId}
-This message is from another agent, not the user.
-To reply, use t3threads send with target ${sender.replyRef} and --caller set to your own T3 thread reference. If the target environment is unavailable, use a configured alias for the sender environment ID.
+  else if (sender) prompt = `[t3threads agent message: ${JSON.stringify(sender.title)}; not the user]
+Reply: t3threads send '${sender.replyRef.replaceAll("'", "'\\''")}' --caller YOUR_THREAD_REF --prompt 'your reply'
 
 ${prompt}`;
   return { type: "thread.turn.start", commandId: crypto.randomUUID(), threadId: thread.id, message: { messageId: crypto.randomUUID(), role: "user", text: prompt, attachments: [] }, modelSelection: thread.modelSelection, runtimeMode: thread.runtimeMode, interactionMode: thread.interactionMode, createdAt: new Date().toISOString() };
