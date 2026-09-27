@@ -24,8 +24,8 @@ test("agent reply templates use prompt files and include alias guidance only for
   const sender = { ref: "local:grace", title: "Grace Hopper's\nreview", environmentId: "grace-env", replyRef: "local:grace" };
   const local = sendCommand(thread, prompt, sender).message.text;
   assert.equal(local, `[t3threads agent message: "Grace Hopper's\\nreview"; not the user]\nReply: t3threads send 'local:grace' --caller YOUR_THREAD_REF --prompt-file REPLY_FILE\n\n${prompt}`);
-  const remote = sendCommand(thread, prompt, { ...sender, replyRef: "connect-grace-env:grace" }).message.text;
-  assert.match(remote, /send 'connect-grace-env:grace' --caller YOUR_THREAD_REF --prompt-file REPLY_FILE\nDirect-only: replace connect-ENV_ID with your configured alias\./);
+  const remote = sendCommand(thread, prompt, { ...sender, replyRef: "graces-box:grace" }).message.text;
+  assert.match(remote, /send 'graces-box:grace' --caller YOUR_THREAD_REF --prompt-file REPLY_FILE\nDirect-only: replace graces-box with your configured name for that machine\./);
   assert.ok(remote.endsWith(`\n\n${prompt}`));
   const quoted = sendCommand(thread, prompt, { ...sender, replyRef: "local:grace'review" }).message.text;
   assert.ok(quoted.includes("send 'local:grace'\\''review'"));

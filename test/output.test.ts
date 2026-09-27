@@ -64,6 +64,8 @@ test("compact discovery keeps worktree identity, attention flags and errors; det
   assert.deepEqual(compact.errors, []);
   const row = compact.results[0].threads[0];
   assert.equal(row.ref, "local:t1");
+  assert.equal(row.project, "Grace Hopper");
+  assert.equal(Object.hasOwn(row, "projectId"), false);
   assert.equal(row.worktreePath, "/work/grace/review");
   assert.equal(row.status, "error");
   assert.equal(row.error, "Provider unavailable");
@@ -75,7 +77,11 @@ test("compact discovery keeps worktree identity, attention flags and errors; det
   assert.equal(row.modelSelection, undefined);
   const detailed = (await read("list", { ...options, details: true })).results[0].threads[0];
   assert.deepEqual(detailed.modelSelection, thread.modelSelection);
+  assert.equal(detailed.projectId, "p1");
   assert.equal(detailed.session.lastError, row.error);
+  const overview = (await read("overview", { ...options, env: "local", includeSettled: true })).results[0].threads[0];
+  assert.equal(overview.project, "Grace Hopper");
+  assert.equal(Object.hasOwn(overview, "projectId"), false);
   assert.equal((await read("projects", options)).results[0].projects[0].defaultModelSelection, undefined);
   assert.deepEqual((await read("projects", { ...options, details: true })).results[0].projects, f.projects);
 });

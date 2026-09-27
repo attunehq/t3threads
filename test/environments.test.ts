@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { writeFile } from "node:fs/promises";
-import { across } from "../src/environments.js";
+import { readFile, writeFile } from "node:fs/promises";
+import { across, connectNames, environments, replyEnvironment, targetFor } from "../src/environments.js";
 import { catalog } from "../src/threads.js";
 import { createCli } from "../src/cli.js";
 import { fixture } from "./fixture.js";
@@ -61,4 +61,48 @@ test("list exposes the shell metadata needed to settle completed investigations"
   assert.equal(thread.hasPendingUserInput, true);
   assert.equal(thread.hasActionableProposedPlan, false);
   assert.equal(thread.backgroundLiveness, "monitoring");
+});
+
+test("Connect names come from machine labels and fall back to the ID when a label is ambiguous or reserved", () => {
+  const e = (environmentId: string, label: string) => ({ environmentId, label, endpoint: { httpBaseUrl: "https://host.test", wsBaseUrl: "wss://host.test" } });
+  const names = connectNames([e("a", "Grace’s MacBook Pro"), e("b", "Twin"), e("c", "twin"), e("d", "local"), e("e", "All"), e("f", "connect-a"), e("g", "!!!"), e("h", "-Anna Winlock-")]);
+  assert.deepEqual(Object.fromEntries(names), {
+    a: "graces-macbook-pro", b: "connect-b", c: "connect-c", d: "connect-d", e: "connect-e", f: "connect-f", g: "connect-g", h: "anna-winlock",
+  });
+});
+
+test("Connect machines resolve by label or ID, print the label name, and yield to configured names", async t => {
+  const ada = await fixture(t, undefined, "ada-env"), grace = await fixture(t, undefined, "grace-env"), shadow = await fixture(t, undefined, "shadow-env");
+  process.env.T3THREADS_TEST_REMOTE = "test-secret"; t.after(() => { delete process.env.T3THREADS_TEST_REMOTE; });
+  const previous = process.env.T3THREADS_STATE_DIR; process.env.T3THREADS_STATE_DIR = ada.dir + "/state";
+  t.after(() => { if (previous) process.env.T3THREADS_STATE_DIR = previous; else delete process.env.T3THREADS_STATE_DIR; });
+  await writeFile(ada.dir + "/userdata/clerk-tokens.json", JSON.stringify({ __clerk_client_jwt: "raw:ada-client" }));
+  const config = JSON.parse(await readFile(ada.configPath, "utf8"));
+  config.environments.remote = { url: grace.target.origin, tokenEnv: "T3THREADS_TEST_REMOTE" };
+  await writeFile(ada.configPath, JSON.stringify(config));
+  const linked = [["ada-env", "Ada Lovelace", ada], ["grace-env", "Grace's Box", grace], ["shadow-env", "Remote", shadow]] as const;
+  const fetch = globalThis.fetch;
+  t.mock.method(globalThis, "fetch", async (url: string, init: RequestInit) => {
+    if (url.startsWith("http://")) return fetch(url, init);
+    if (url.startsWith("https://clerk.t3.codes/v1/client/sessions/")) return Response.json({ jwt: "relay-jwt" });
+    if (url.startsWith("https://clerk.t3.codes/v1/client")) return Response.json({ response: { last_active_session_id: "ada", sessions: [{ id: "ada", status: "active" }] } });
+    assert.equal(url, "https://relay.t3.codes/v1/environments");
+    return Response.json({ environments: linked.map(([environmentId, label, f]) => ({ environmentId, label, endpoint: { httpBaseUrl: f.target.origin, wsBaseUrl: f.target.origin.replace("http", "ws") } })) });
+  });
+  const options = { config: ada.configPath };
+  const listed = await environments(options);
+  assert.deepEqual(Object.keys(listed.entries).sort(), ["ada-lovelace", "connect-shadow-env", "graces-box", "local", "remote"]);
+  for (const [ref, name, environmentId] of [
+    ["graces-box:t1", "graces-box", "grace-env"],
+    ["connect-grace-env:t1", "graces-box", "grace-env"],
+    ["remote:t1", "remote", "grace-env"],
+    ["connect-shadow-env:t1", "connect-shadow-env", "shadow-env"],
+  ]) {
+    const { target, id } = await targetFor(options, ref);
+    assert.deepEqual([target.name, target.descriptor.environmentId, id], [name, environmentId, "t1"], ref);
+  }
+  await assert.rejects(targetFor(options, "anna-winlock:t1"), { code: "ENVIRONMENT_NOT_FOUND" });
+  assert.equal(await replyEnvironment(options, "grace-env", "ada-env"), "graces-box");
+  assert.equal(await replyEnvironment(options, "ada-env", "ada-env"), "local");
+  assert.equal(await replyEnvironment(options, "unlinked-env", "ada-env"), "connect-unlinked-env");
 });

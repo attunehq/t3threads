@@ -1,5 +1,5 @@
 import { CliError, fail, withApi } from "./client.js";
-import { targetFor, safeError, parseRef, type Common } from "./environments.js";
+import { targetFor, safeError, parseRef, replyEnvironment, type Common } from "./environments.js";
 import { busy, dispatch, readThread, sendCommand } from "./threads.js";
 import { State } from "./state.js";
 
@@ -69,7 +69,7 @@ export function queueDelivery(signal?: AbortSignal): QueueDelivery {
             sender = await withApi(source.target, async sourceApi => ({
               ref: `${caller.name}:${caller.id}`, title: (await readThread(sourceApi, caller.id, 1)).thread.title,
               environmentId: source.target.descriptor.environmentId,
-              replyRef: `${source.target.descriptor.environmentId === target.descriptor.environmentId ? "local" : `connect-${source.target.descriptor.environmentId}`}:${caller.id}`,
+              replyRef: `${await replyEnvironment(message.options, source.target.descriptor.environmentId, target.descriptor.environmentId, signal)}:${caller.id}`,
             }), signal);
           }
           command = sendCommand(thread, request.prompt, sender ?? { externalCaller: request.externalCaller! }, "steer");

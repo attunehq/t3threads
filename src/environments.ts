@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Api, CliError, configuration, discover, expand, fail, withApi, type Environment, type Target } from "./client.js";
-import { isConnected, linkedConfig, linkedEnvironments } from "./connect.js";
+import { isConnected, linkedConfig, linkedEnvironments, type LinkedEnvironment } from "./connect.js";
 
 export type Common = { env?: string; home?: string; config?: string };
 export const loadConfig = (options: Common) => configuration(expand(options.config ?? join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "t3threads/config.json")), options.config !== undefined);
@@ -15,10 +15,32 @@ export async function environments(options: Common, signal?: AbortSignal) {
   const connectAuthenticated = await isConnected(connect);
   if (connectAuthenticated) {
     try {
-      for (const e of await linkedEnvironments(connect, undefined, signal)) entries[`connect-${e.environmentId}`] = linkedConfig(e, connect);
+      const linked = await linkedEnvironments(connect, undefined, signal), names = connectNames(linked);
+      for (const e of linked) entries[Object.hasOwn(entries, names.get(e.environmentId)!) ? `connect-${e.environmentId}` : names.get(e.environmentId)!] = linkedConfig(e, connect);
     } catch (error) { errors.push(safeError("connect", error)); }
   }
   return { entries, errors, connectAuthenticated, localTarget };
+}
+/** Names come from Connect labels alone, so every machine on the account derives the same name for a host. */
+export function connectNames(linked: LinkedEnvironment[]) {
+  const slug = (label: string) => label.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const counts = new Map<string, number>();
+  for (const e of linked) counts.set(slug(e.label), (counts.get(slug(e.label)) ?? 0) + 1);
+  return new Map(linked.map(e => {
+    const name = slug(e.label);
+    return [e.environmentId, name && counts.get(name) === 1 && name !== "local" && name !== "all" && !name.startsWith("connect-") ? name : `connect-${e.environmentId}`];
+  }));
+}
+/** The recipient resolves this name through Connect; the connect-ID form needs no label lookup. */
+export async function replyEnvironment(options: Common, sender: string, recipient: string, signal?: AbortSignal) {
+  if (sender === recipient) return "local";
+  try {
+    const configured = await loadConfig(options);
+    const connect = { ...configured.connect, home: configured.environments.local?.home ?? configured.connect?.home };
+    // A reply address only shortens the prompt, so a Connect failure must not block delivery.
+    if (await isConnected(connect)) return connectNames(await linkedEnvironments(connect, undefined, signal)).get(sender) ?? `connect-${sender}`;
+  } catch { /* Fall back to the ID form. */ }
+  return `connect-${sender}`;
 }
 export function parseRef(ref: string, environment = "local") {
   const index = ref.indexOf(":");
@@ -33,17 +55,22 @@ export async function targetFor(options: Common, ref?: string, signal?: AbortSig
   if (options.home && parsed.name !== "local") fail("INVALID_ARGUMENT", "--home only applies to local.");
   const configured = await loadConfig(options);
   if (parsed.name !== "local") await discover("local", configured.environments.local ?? {}, signal);
-  let config = configured.environments[parsed.name];
-  if (parsed.name.startsWith("connect-") && !config) {
-    const connect = { ...configured.connect, home: configured.environments.local?.home ?? configured.connect?.home };
-    const linked = await linkedEnvironments(connect, undefined, signal);
-    const found = linked.find(e => `connect-${e.environmentId}` === parsed.name);
-    if (found) config = linkedConfig(found, connect);
+  let name = parsed.name, config = configured.environments[name];
+  const connect = { ...configured.connect, home: configured.environments.local?.home ?? configured.connect?.home };
+  if (!config && name !== "local" && (name.startsWith("connect-") || await isConnected(connect))) {
+    const linked = await linkedEnvironments(connect, undefined, signal), names = connectNames(linked);
+    const found = linked.find(e => name === `connect-${e.environmentId}` || name === names.get(e.environmentId));
+    if (found) {
+      config = linkedConfig(found, connect);
+      // Print the canonical name even when the caller used the connect-ID form.
+      const alias = names.get(found.environmentId)!;
+      name = configured.environments[alias] ? `connect-${found.environmentId}` : alias;
+    }
   }
-  if (!config && parsed.name !== "local") fail("ENVIRONMENT_NOT_FOUND", "Unknown environment. Run environments first.");
+  if (!config && name !== "local") fail("ENVIRONMENT_NOT_FOUND", "Unknown environment. Run environments first.");
   config = { ...config, ...(options.home ? { home: expand(options.home) } : {}) };
   if (options.home && config.url) fail("INVALID_ARGUMENT", "--home cannot override a URL environment.");
-  const target = await discover(parsed.name, config, signal);
+  const target = await discover(name, config, signal);
   if (config.connectId && config.connectId !== target.descriptor.environmentId) fail("CONNECT_IDENTITY_MISMATCH", "The discovered server does not match the linked environment.");
   return { target, id: parsed.id };
 }

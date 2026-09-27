@@ -3,9 +3,9 @@ import type { Thread } from "./threads.js";
 import type { QueuedMessage } from "./queue.js";
 import type { Watch } from "./watchers.js";
 
-export function threadOutput(t: Thread) {
+export function threadOutput(t: Thread, project?: string) {
   return {
-    title: t.title, projectId: t.projectId, status: status(t), updatedAt: t.updatedAt,
+    title: t.title, project, status: status(t), updatedAt: t.updatedAt,
     branch: t.branch ?? undefined, worktreePath: t.worktreePath ?? undefined,
     archivedAt: t.archivedAt || undefined, settledAt: t.settledAt || undefined,
     hasPendingApprovals: t.hasPendingApprovals, hasPendingUserInput: t.hasPendingUserInput,
