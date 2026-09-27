@@ -194,6 +194,13 @@ Output is compact by default; add `--json` for JSON. `projects`, `list`, `read`,
 in MCP/API). JSON uses the same compact defaults; scripts that need the former
 full output should request details.
 
+**Upgrading from 0.5.x to 0.6.0:** T3 Connect machines are now named after
+their T3 label, for example `jessbox:abc123` instead of
+`connect-ENV_ID:abc123`. The `connect-ENV_ID` form still resolves, so saved
+references and queued messages keep working. Compact `overview` and `list`
+rows name the project by title instead of `projectId`, and compact `read`
+omits `projectId`. Add `--details` when you need the project ID.
+
 **Upgrading from 0.4.x to 0.5.0:** default CLI, JSON, MCP, and Fetch output now
 omits diagnostic metadata and stored payloads. Add `--details` (`details: true`
 in MCP/API) to existing `projects`, `list`, `read`, `queued`, and `watchers`
@@ -203,8 +210,7 @@ compact status; retrieve full records through `watchers` or `queued` with
 thread is unsettled; do not require `settledAt === null`.
 
 A thread reference has the form `ENV:THREAD_ID`, for example `local:abc123` or
-`connect-ENV_ID:abc123`. Commands print these references wherever a thread
-appears.
+`jessbox:abc123`. Commands print these references wherever a thread appears.
 
 `overview` and `find` cover every machine. `projects`, `list`, and `search` cover
 only the local machine unless you pass `--env all` or `--env NAME`.
@@ -371,8 +377,9 @@ Reply: t3threads send 'local:SENDER_ID' --caller YOUR_THREAD_REF --prompt-file R
 Write the reply to a UTF-8 file and replace `REPLY_FILE` with its path, quoting
 the path if needed. This keeps apostrophes and other shell syntax in the reply
 out of the command. In MCP, supply the reply text as `prompt` instead.
-Cross-machine replies use `connect-ENV_ID:SENDER_ID` and include a third line:
-`Direct-only: replace connect-ENV_ID with your configured alias.`
+Cross-machine replies use the sender machine's name, such as
+`jessbox:SENDER_ID`, and include a third line:
+`Direct-only: replace jessbox with your configured name for that machine.`
 
 Integrations outside T3 use `--external-caller NAME` instead of `--caller`:
 
@@ -399,7 +406,7 @@ in again.
 ### Get notified when threads finish
 
 ```sh
-t3threads watch --threads local:THREAD_A --threads connect-ENV_ID:THREAD_B \
+t3threads watch --threads local:THREAD_A --threads jessbox:THREAD_B \
   --caller local:MY_THREAD_ID --condition all-completed
 
 t3threads watch --threads local:THREAD_A --caller local:MY_THREAD_ID \
@@ -492,7 +499,13 @@ On Linux and Windows, run `t3threads watch-run` under your own service manager.
 
 If you are signed in to T3 Connect in the T3 desktop app, t3threads finds your
 other machines automatically. Run `t3threads environments` to see them. Each one
-is named `connect-ENVIRONMENT_ID`.
+is named after its T3 label in lowercase, with other characters replaced by
+hyphens: a machine labeled `JessBox` is `jessbox`. A machine keeps the
+`connect-ENVIRONMENT_ID` name when its label is empty, reserved (`local`,
+`all`), shared with another machine, or taken by an environment in your
+configuration. The `connect-ENVIRONMENT_ID` form resolves for every machine.
+Renaming a machine in T3 changes its name here; references that use the old
+name stop resolving.
 
 t3threads reads T3's saved sign-in and never changes it. Once after signing in,
 run `t3threads environments` while the login Keychain is accessible and allow

@@ -12,6 +12,11 @@ metadata or stored payloads; `--json` alone keeps compact fields. `read` retains
 all message text and roles in the requested page, plus attachment counts.
 Partial messages keep `streaming: true`; finished messages omit the flag.
 Details adds message IDs/timestamps, attachments, and thread/session settings.
+Compact rows name projects by title; details adds `projectId`.
+
+References look like `local:THREAD_ID` or `jessbox:THREAD_ID`. T3 Connect
+machines are named after their T3 label; `connect-ENV_ID` also resolves. Copy
+references from command output.
 
 Start with `overview` for cheap open-thread metadata across all machines. Inspect
 `complete` and `errors`: an offline host is unknown, never empty or finished.
@@ -94,7 +99,7 @@ of the recipient's `--env`. Send labels your thread title as an agent message
 own thread reference and `REPLY_FILE` with a UTF-8 file containing the reply;
 quote the file path if needed. In MCP, use `prompt` for the reply text.
 Cross-machine messages also carry a direct-only connection hint: replace the
-reply target's `connect-ENV_ID` with your configured alias for that environment.
+reply target's machine name with your configured name for that machine.
 Send keeps the recipient's model, permission, and interaction settings. In MCP,
 supply `caller` and `prompt`; stdin carries MCP protocol messages.
 
@@ -114,7 +119,7 @@ reported thread ID before retrying; it may already have been accepted.
 For authorized coordination, register a one-shot watcher:
 
 ```sh
-t3threads watch --threads local:THREAD_A --threads connect-ENV_ID:THREAD_B \
+t3threads watch --threads local:THREAD_A --threads jessbox:THREAD_B \
   --caller local:CALLER_ID --condition all-completed
 ```
 

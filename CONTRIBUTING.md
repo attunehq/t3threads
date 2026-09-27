@@ -116,6 +116,15 @@ Per-environment session credentials and DPoP keys live in t3threads' state and
 are renewed through the same account. A rejected environment credential is renewed once under the shared session lock before retrying the HTTP request. A sign-out in T3 takes effect on the next
 connection.
 
+Environment names for linked machines come from `connectNames` in
+`src/environments.ts`. The name depends only on the account's Connect
+environment list, so the sender and recipient derive the same name for a reply
+address. Local configuration can only push a name back to its
+`connect-ENV_ID` form, which always resolves. A queued message to a label name
+pins the environment ID on its first dispatch attempt. If the name later moves to
+another machine, delivery fails with `ENVIRONMENT_MISMATCH` instead of
+redirecting.
+
 Headless OAuth sign-in cannot yet bootstrap a relay client session. Windows and
 Linux adapters for T3's encrypted desktop credentials are not implemented.
 

@@ -198,7 +198,7 @@ Source and reply instructions below.
 
 ${prompt}`;
   else if (sender) prompt = `[t3threads agent message: ${JSON.stringify(sender.title)}; not the user]
-Reply: t3threads send '${sender.replyRef.replaceAll("'", "'\\''")}' --caller YOUR_THREAD_REF --prompt-file REPLY_FILE${sender.replyRef.startsWith("connect-") ? "\nDirect-only: replace connect-ENV_ID with your configured alias." : ""}
+Reply: t3threads send '${sender.replyRef.replaceAll("'", "'\\''")}' --caller YOUR_THREAD_REF --prompt-file REPLY_FILE${sender.replyRef.startsWith("local:") ? "" : `\nDirect-only: replace ${sender.replyRef.slice(0, sender.replyRef.indexOf(":"))} with your configured name for that machine.`}
 
 ${prompt}`;
   return { type: "thread.turn.start", commandId: crypto.randomUUID(), threadId: thread.id, message: { messageId: crypto.randomUUID(), role: "user", text: prompt, attachments: [] }, modelSelection: thread.modelSelection, runtimeMode: thread.runtimeMode, interactionMode: thread.interactionMode, createdAt: new Date().toISOString() };
