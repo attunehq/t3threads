@@ -6,7 +6,7 @@ import { createCli } from "../src/cli.js";
 import { State } from "../src/state.js";
 import { enqueueSend } from "../src/queue.js";
 import { sendCommand } from "../src/threads.js";
-import type { Watch } from "../src/watchers.js";
+import { addWatch, tick, type Watch, type WatchRuntime } from "../src/watchers.js";
 import { fixture, json, message, thread } from "./fixture.js";
 
 const cli = createCli();
@@ -78,6 +78,48 @@ test("compact discovery keeps worktree identity, attention flags and errors; det
   assert.equal(detailed.session.lastError, row.error);
   assert.equal((await read("projects", options)).results[0].projects[0].defaultModelSelection, undefined);
   assert.deepEqual((await read("projects", { ...options, details: true })).results[0].projects, f.projects);
+});
+
+test("compact reads distinguish partial messages without adding flags to finished messages", async t => {
+  const f = await fixture(t);
+  const partial = { ...message("3", "I am checking"), streaming: true };
+  f.stored.get("t1")!.messages = [message("1", "Task"), { ...message("2", "Earlier reply"), streaming: false }, partial];
+  const compact = await read("read/t1", { config: f.configPath });
+  assert.deepEqual(compact.messages, [
+    { role: "assistant", text: "Task" },
+    { role: "assistant", text: "Earlier reply" },
+    { role: "assistant", text: partial.text, streaming: true },
+  ]);
+  const detailed = await read("read/t1", { config: f.configPath, details: true });
+  assert.equal(detailed.messages[1].streaming, false);
+  assert.deepEqual(detailed.messages[2], partial);
+});
+
+test("events-only watchers expose fired decisions without per-thread evidence", async t => {
+  const f = await fixture(t);
+  const prior = process.env.T3THREADS_STATE_DIR;
+  process.env.T3THREADS_STATE_DIR = f.dir + "/state";
+  t.after(() => { if (prior === undefined) delete process.env.T3THREADS_STATE_DIR; else process.env.T3THREADS_STATE_DIR = prior; });
+  const state = new State();
+  const decision = { matches: true, reason: "The review is complete", probability: 0.96 };
+  const rt: WatchRuntime = {
+    async observe(ref) { return { ref, thread }; },
+    async evaluate() { return decision; },
+    async deliver() { assert.fail("An events-only watcher must not send a notification"); },
+  };
+  const watch = await addWatch({ refs: ["local:t1"], condition: { kind: "jev", prompt: "Is the review complete?", threshold: 0.9 }, options: {}, modelEnv: "local", intervalSeconds: 5, expiresInHours: 1 }, state, rt);
+  const active = (await read("watchers", { id: watch.id })).watchers[0];
+  assert.equal(active.status, "active");
+  assert.equal(Object.hasOwn(active, "decision"), false);
+  await tick(state, rt);
+  const triggered = (await read("watchers", { id: watch.id })).watchers[0];
+  assert.equal(triggered.status, "triggered");
+  assert.ok(triggered.firedAt);
+  assert.deepEqual(triggered.decision, decision);
+  assert.equal(Object.hasOwn(triggered, "evidence"), false);
+  const full = (await read("watchers", { id: watch.id, details: true })).watchers[0];
+  assert.deepEqual(full.evidence.decision, decision);
+  assert.equal(full.evidence.threads[0].ref, "local:t1");
 });
 
 test("queue and watcher inspection omits stored payloads by default and retrieves one full record on demand", async t => {

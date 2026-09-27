@@ -19,6 +19,18 @@ function queueState(t: TestContext, directory: string) {
   return state;
 }
 
+test("agent reply templates use prompt files and include alias guidance only for cross-machine replies", () => {
+  const prompt = "I've checked the tests.\nKeep `code` and $variables literal.\n";
+  const sender = { ref: "local:grace", title: "Grace Hopper's\nreview", environmentId: "grace-env", replyRef: "local:grace" };
+  const local = sendCommand(thread, prompt, sender).message.text;
+  assert.equal(local, `[t3threads agent message: "Grace Hopper's\\nreview"; not the user]\nReply: t3threads send 'local:grace' --caller YOUR_THREAD_REF --prompt-file REPLY_FILE\n\n${prompt}`);
+  const remote = sendCommand(thread, prompt, { ...sender, replyRef: "connect-grace-env:grace" }).message.text;
+  assert.match(remote, /send 'connect-grace-env:grace' --caller YOUR_THREAD_REF --prompt-file REPLY_FILE\nDirect-only: replace connect-ENV_ID with your configured alias\./);
+  assert.ok(remote.endsWith(`\n\n${prompt}`));
+  const quoted = sendCommand(thread, prompt, { ...sender, replyRef: "local:grace'review" }).message.text;
+  assert.ok(quoted.includes("send 'local:grace'\\''review'"));
+});
+
 test("history pagination finds old messages and deduplicates page overlap", async t => {
   const f = await fixture(t, (req, res) => {
     const url = new URL(req.url!, "http://localhost");

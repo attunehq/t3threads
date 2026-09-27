@@ -15,7 +15,7 @@ export function threadOutput(t: Thread) {
 }
 
 export function messageOutput(m: NonNullable<Thread["messages"]>[number]) {
-  return { role: m.role, text: m.text, ...(m.attachments?.length ? { attachmentCount: m.attachments.length } : {}) };
+  return { role: m.role, text: m.text, ...(m.streaming === true ? { streaming: true } : {}), ...(m.attachments?.length ? { attachmentCount: m.attachments.length } : {}) };
 }
 
 export function queuedOutput(m: QueuedMessage) {
@@ -31,6 +31,7 @@ export function watchOutput(w: Watch) {
   return {
     id: w.id, refs: w.refs, caller: w.caller, condition: w.condition, status: w.status,
     expiresAt: w.expiresAt, lastCheck: w.lastCheck, firedAt: w.firedAt, deliveredAt: w.deliveredAt,
+    ...(w.firedAt && w.evidence && typeof w.evidence === "object" && "decision" in w.evidence ? { decision: w.evidence.decision } : {}),
     ...(w.errors?.length ? { errors: w.errors } : {}),
   };
 }

@@ -10,6 +10,7 @@ The CLI and MCP server expose the same commands and validation.
 Request `--details` (`details: true` in MCP/API) only when you need full
 metadata or stored payloads; `--json` alone keeps compact fields. `read` retains
 all message text and roles in the requested page, plus attachment counts.
+Partial messages keep `streaming: true`; finished messages omit the flag.
 Details adds message IDs/timestamps, attachments, and thread/session settings.
 
 Start with `overview` for cheap open-thread metadata across all machines. Inspect
@@ -88,11 +89,12 @@ On macOS, install the background service on each sending machine to recover
 after crashes and logins; `service status` includes sign-in warm-up health.
 For a T3 caller, resolve your own thread with `list` using the current
 worktree, not a provider conversation ID. Bare caller IDs mean local regardless
-of the recipient's `--env`. Send adds two lines: your thread title marked as an
-agent message (not the user), and a reply command. Replace `YOUR_THREAD_REF`
-with your own thread reference when replying. For direct-only connections,
-replace the reply target's `connect-ENV_ID` with your configured alias for that
-environment.
+of the recipient's `--env`. Send labels your thread title as an agent message
+(not the user) and gives a reply command. Replace `YOUR_THREAD_REF` with your
+own thread reference and `REPLY_FILE` with a UTF-8 file containing the reply;
+quote the file path if needed. In MCP, use `prompt` for the reply text.
+Cross-machine messages also carry a direct-only connection hint: replace the
+reply target's `connect-ENV_ID` with your configured alias for that environment.
 Send keeps the recipient's model, permission, and interaction settings. In MCP,
 supply `caller` and `prompt`; stdin carries MCP protocol messages.
 
@@ -124,8 +126,10 @@ Conditions are `all-completed`, `all-idle`, `any-error`, `changed`, `text`, or
 `jev`; the last two require `--prompt` describing the condition. Successful
 latest turns are not verified PR readiness. Watchers freeze an explicit set,
 survive CLI/MCP exit, poll every 30 seconds, and expire after 24 hours by default.
-`watchers` shows status/errors; `watchers --id ID --details` includes evidence
-and delivery metadata. `unwatch ID` cancels a watcher. Review notified
+`watchers` shows status/errors and the `decision` once fired, including its
+reason/probability when present, also for events-only watchers.
+`watchers --id ID --details` includes per-thread evidence and delivery metadata.
+`unwatch ID` cancels a watcher. Review notified
 evidence before merging or taking other consequential actions.
 
 `classify` accepts named Jev `noul`, `choice`, and `score` questions in `questions`

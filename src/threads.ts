@@ -10,7 +10,7 @@ export type Thread = {
   hasPendingApprovals?: boolean; hasPendingUserInput?: boolean; hasActionableProposedPlan?: boolean; backgroundLiveness?: string | null;
   modelSelection: Model; runtimeMode: string; interactionMode: string; branch: string | null; worktreePath: string | null;
   latestTurn?: { state: string } | null; session?: { status: string; activeTurnId: string | null; lastError: string | null } | null;
-  messages?: { id: string; role: string; text: string; createdAt: string; attachments?: unknown[] }[];
+  messages?: { id: string; role: string; text: string; createdAt: string; streaming?: boolean; attachments?: unknown[] }[];
 };
 export type Snapshot = { thread: Thread; snapshotSequence: number; page?: { beforeCursor: string | null; hasMore: boolean } };
 
@@ -198,7 +198,7 @@ Source and reply instructions below.
 
 ${prompt}`;
   else if (sender) prompt = `[t3threads agent message: ${JSON.stringify(sender.title)}; not the user]
-Reply: t3threads send '${sender.replyRef.replaceAll("'", "'\\''")}' --caller YOUR_THREAD_REF --prompt 'your reply'
+Reply: t3threads send '${sender.replyRef.replaceAll("'", "'\\''")}' --caller YOUR_THREAD_REF --prompt-file REPLY_FILE${sender.replyRef.startsWith("connect-") ? "\nDirect-only: replace connect-ENV_ID with your configured alias." : ""}
 
 ${prompt}`;
   return { type: "thread.turn.start", commandId: crypto.randomUUID(), threadId: thread.id, message: { messageId: crypto.randomUUID(), role: "user", text: prompt, attachments: [] }, modelSelection: thread.modelSelection, runtimeMode: thread.runtimeMode, interactionMode: thread.interactionMode, createdAt: new Date().toISOString() };
