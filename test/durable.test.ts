@@ -113,9 +113,9 @@ test("offline cross-machine message and reply survive separate outboxes and pres
   await writeFile(ada.configPath, JSON.stringify(config(ada, grace)));
   await tickQueue(new State(adaState.directory), undefined, 6000);
   assert.equal(adaState.get<QueuedMessage>("message", first.id)?.status, "accepted");
-  assert.match(grace.commands[0]!.message.text, /target connect-ada-env:t1/);
+  assert.match(grace.commands[0]!.message.text, /send .connect-ada-env:t1. --caller/);
   const reply = enqueueSend({ ref: "connect-ada-env:t1", options: { config: grace.configPath }, request: { prompt: "Reviewed", caller: "local:t1", steer: true } }, graceState);
   await tickQueue(new State(graceState.directory));
   assert.equal(graceState.get<QueuedMessage>("message", reply.id)?.status, "accepted");
-  assert.match(ada.commands[0]!.message.text, /target connect-grace-env:t1/);
+  assert.match(ada.commands[0]!.message.text, /send .connect-grace-env:t1. --caller/);
 });

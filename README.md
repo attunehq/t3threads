@@ -189,7 +189,18 @@ Start a new thread so the agent picks up the server, then ask things like:
 ## Use it from the terminal
 
 Every MCP tool is also a command. Run `t3threads COMMAND --help` for all options.
-Output is compact by default; add `--json` for JSON.
+Output is compact by default; add `--json` for JSON. `projects`, `list`, `read`,
+`queued`, and `watchers` accept `--details` for full metadata (`details: true`
+in MCP/API). JSON uses the same compact defaults; scripts that need the former
+full output should request details.
+
+**Upgrading from 0.4.x to 0.5.0:** default CLI, JSON, MCP, and Fetch output now
+omits diagnostic metadata and stored payloads. Add `--details` (`details: true`
+in MCP/API) to existing `projects`, `list`, `read`, `queued`, and `watchers`
+calls that depend on those fields. `watch`, `unwatch`, and `unqueue` return
+compact status; retrieve full records through `watchers` or `queued` with
+`--id ID --details`. In compact thread output, an absent `settledAt` means the
+thread is unsettled; do not require `settledAt === null`.
 
 A thread reference has the form `ENV:THREAD_ID`, for example `local:abc123` or
 `connect-ENV_ID:abc123`. Commands print these references wherever a thread
@@ -240,6 +251,14 @@ t3threads read local:THREAD_ID --all
 You can select a project by its ID, exact title, or workspace path. `read` shows
 the latest 20 user turns and a cursor. Pass the cursor to `--before` for older
 history, or use `--all` for the complete conversation.
+
+`read` keeps the full text and role of every message in the selected page.
+Partial messages include `streaming: true`; finished messages omit the flag.
+Messages with attachments show an `attachmentCount`; use `read REF --details`
+for attachment metadata, message IDs and timestamps, and thread settings.
+`list` keeps status, branch/worktree paths, and attention flags; `--details`
+also shows model, permission, and session metadata. Unset paths and empty
+archive/settlement timestamps are omitted in compact output.
 
 Summaries and `find` results come from a model. Treat them as leads to check,
 not as proof that tests passed or a PR is ready.
@@ -317,6 +336,11 @@ contacted. They return `status: queued`, a `queueId`, and a stable `commandId`.
 This confirms local storage, not delivery. Use `queued` to check acceptance or
 errors; do not resend a queued message.
 
+Use `queued --id QUEUE_ID` to inspect one delivery. Add `--details` to see its
+prompt, stable command/message IDs, and stored dispatch payload. The default
+view shows delivery status, sender, timestamps, and errors without repeating
+message bodies. `unqueue` returns the same compact status view.
+
 - Plain `send` waits for the recipient to be idle.
 - `--steer` delivers during a running turn, or starts an idle thread. It also
   survives an offline recipient, locked Mac, or worker restart.
@@ -336,6 +360,19 @@ The recipient keeps its own model and settings.
 sender's title and a reply address, marked as a message from another agent, not
 from you. Find your own thread ID with `list`. A provider's session ID is not a
 T3 thread ID.
+
+The message prefix is two lines, followed by your unchanged prompt:
+
+```text
+[t3threads agent message: "Grace Hopper's review"; not the user]
+Reply: t3threads send 'local:SENDER_ID' --caller YOUR_THREAD_REF --prompt-file REPLY_FILE
+```
+
+Write the reply to a UTF-8 file and replace `REPLY_FILE` with its path, quoting
+the path if needed. This keeps apostrophes and other shell syntax in the reply
+out of the command. In MCP, supply the reply text as `prompt` instead.
+Cross-machine replies use `connect-ENV_ID:SENDER_ID` and include a third line:
+`Direct-only: replace connect-ENV_ID with your configured alias.`
 
 Integrations outside T3 use `--external-caller NAME` instead of `--caller`:
 
@@ -397,7 +434,11 @@ ready to merge.
 to 100,000 characters in total. For larger sets, watch fewer threads or use one
 of the status conditions.
 
-`watchers` shows each watcher's state, evidence, and errors. `unwatch` stops a
+`watchers` shows each watcher's condition, state, delivery timestamps, and
+errors. Once fired, it also shows the `decision`, including the reason and
+probability when present. This includes events-only watchers. Use
+`watchers --id WATCH_ID --details` for per-thread evidence and delivery
+metadata. `watch` and `unwatch` return compact status views; `unwatch` stops a
 watcher, including a notification that was not yet sent.
 
 ### Manage threads
@@ -560,8 +601,10 @@ const response = await cli.fetch(new Request('http://local/projects'))
 console.log(await response.json())
 ```
 
-Read commands take query parameters. Commands that change threads take a JSON
-`POST` body:
+Read commands take query parameters or a JSON `POST` body. Boolean options such
+as `details` and `all` require JSON booleans in a `POST` body; the current Fetch
+adapter does not convert GET strings to booleans. Commands that change threads
+require a JSON `POST` body:
 
 ```js
 await cli.fetch(new Request('http://local/start', {

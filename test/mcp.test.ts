@@ -48,6 +48,8 @@ test("stdio MCP advertises schemas and runs the same read and write commands", {
   assert.equal(tools.find(t => t.name === "start")?.annotations.readOnlyHint, false);
   assert.equal(tools.find(t => t.name === "start")?.annotations.idempotentHint, false);
   assert.ok(tools.find(t => t.name === "read")?.inputSchema.properties.env);
+  for (const name of ["projects", "list", "read", "queued", "watchers"]) assert.ok(tools.find(t => t.name === name)?.inputSchema.properties.details);
+  for (const name of ["queued", "watchers"]) assert.ok(tools.find(t => t.name === name)?.inputSchema.properties.id);
   assert.equal(tools.find(t => t.name === "watch")?.annotations.readOnlyHint, false);
   assert.ok(tools.find(t => t.name === "watch")?.inputSchema.properties.condition);
   assert.ok(tools.find(t => t.name === "send")?.inputSchema.properties.caller);
@@ -67,6 +69,10 @@ test("stdio MCP advertises schemas and runs the same read and write commands", {
   const read = await call("tools/call", { name: "read", arguments: { config: f.configPath, thread: f.commands[0]!.threadId } });
   assert.ok(!read.result.isError, JSON.stringify(read));
   assert.ok(JSON.stringify(read.result).includes("Review this task"));
+  assert.ok(!JSON.stringify(read.result).includes("modelSelection"));
+  const detailed = await call("tools/call", { name: "read", arguments: { config: f.configPath, thread: f.commands[0]!.threadId, details: true } });
+  assert.ok(!detailed.result.isError, JSON.stringify(detailed));
+  assert.ok(JSON.stringify(detailed.result).includes("modelSelection"));
   const missingCaller = await call("tools/call", { name: "send", arguments: { config: f.configPath, thread: f.commands[0]!.threadId, prompt: "Check the tests." } });
   assert.equal(missingCaller.result.isError, true);
   assert.equal(f.commands.length, 1);
@@ -75,8 +81,8 @@ test("stdio MCP advertises schemas and runs the same read and write commands", {
   assert.match(JSON.stringify(sent.result), /queued/);
   await tickQueue(state);
   assert.equal(f.commands.length, 2);
-  assert.match(f.commands[1]!.message.text, /Sender thread: local:t1/);
-  assert.match(f.commands[1]!.message.text, /from another agent, not the user/);
+  assert.match(f.commands[1]!.message.text, /Reply: t3threads send .local:t1. --caller YOUR_THREAD_REF/);
+  assert.match(f.commands[1]!.message.text, /agent message:.*; not the user/);
   assert.ok(f.commands[1]!.message.text.endsWith("\n\nCheck the tests."));
   f.stored.get("t1")!.latestTurn = { state: "running" };
   const steered = await call("tools/call", { name: "send", arguments: { config: f.configPath, thread: "t1", caller: "local:t1", prompt: "Continue now.", steer: true } });
@@ -86,7 +92,7 @@ test("stdio MCP advertises schemas and runs the same read and write commands", {
   const external = await call("tools/call", { name: "send", arguments: { config: f.configPath, thread: "t1", externalCaller: "jessbot", prompt: "Ada sent a Slack follow-up.", steer: true } });
   assert.ok(!external.result.isError, JSON.stringify(external));
   assert.equal(f.commands.length, 4);
-  assert.match(f.commands[3]!.message.text, /external caller "jessbot"/);
+  assert.match(f.commands[3]!.message.text, /external message: "jessbot" \(unverified caller\)/);
   const bothCallers = await call("tools/call", { name: "send", arguments: { config: f.configPath, thread: "t1", caller: "local:t1", externalCaller: "jessbot", prompt: "Continue.", steer: true } });
   assert.equal(bothCallers.result.isError, true);
   assert.equal(f.commands.length, 4);
