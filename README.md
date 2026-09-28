@@ -45,10 +45,9 @@ Never ask me to paste my Mac password or credentials into the chat.
    for custom provider home directories and configure those actual homes.
    Preserve existing configuration and avoid duplicate registrations.
 3. Install the t3threads agent skill where those providers will discover it.
-   Add a short note to their persistent agent instructions to use t3threads
-   when related threads may contain useful context, to check for overlapping
-   work, and when I ask to delegate or follow up in another T3 thread. Follow
-   the skill's guidance for handoffs and completion notifications.
+   Add the "Persistent agent instructions" snippet below to their actual
+   instruction files, preserving existing guidance and avoiding duplicates.
+   Follow the skill's guidance for handoffs and completion notifications.
    Instruct agents to omit model and permission overrides so new threads use
    the destination project's T3 settings, then that machine's defaults. Only
    pass explicit overrides when I request them.
@@ -58,9 +57,11 @@ Never ask me to paste my Mac password or credentials into the chat.
 5. Verify access with `t3threads environments` and `t3threads overview`. Report
    unreachable machines or other gaps. Leave optional Jev/TypeSafe setup alone
    unless I ask for it.
-6. Summarize what you configured and any remaining steps. Tell me how to start
-   a fresh agent session and verify it can see the skill and call the t3threads
-   overview tool. Do not call setup complete based on `doctor` alone.
+6. Follow "Verify agent access" below for each provider home on each machine
+   being configured. Verify the skill, persistent instructions, and MCP tools
+   in a fresh session. Report checks requiring a new session as pending until
+   observed; do not call setup complete based on `doctor` alone. Summarize the
+   configuration and any remaining steps.
 ```
 
 Installing the CLI does not give your agents MCP access or instructions to use
@@ -179,7 +180,53 @@ and how to hand off work safely:
 npx skills add attunehq/t3threads
 ```
 
-Start a new thread so the agent picks up the server, then ask things like:
+### Persistent agent instructions
+
+Add this note to the persistent instructions loaded by each provider you use in
+T3 (for example, its `AGENTS.md` or `CLAUDE.md`). Use the actual provider home,
+including any custom home configured in T3, and preserve existing instructions.
+
+```text
+Use t3threads when asked to start, spin off, delegate to, message, or coordinate
+T3 Code threads, or when related threads may contain useful context or overlapping
+work. Prefer its MCP tools; use the t3threads CLI when MCP is unavailable.
+An explicit request to create or message threads authorizes that action within
+the requested scope. T3 threads are persistent conversations visible in T3;
+use them when requested instead of harness subagents. Read the t3threads skill
+for handoffs and completion notifications. Preserve the full approved scope in
+task briefs. Inherit destination model and permission settings unless the user
+requests overrides. Use watchers for follow-up; yield when waiting so completion
+notifications can wake the caller.
+```
+
+### Verify agent access
+
+Repeat these checks for each provider home on each machine you configure:
+
+1. Confirm the t3threads skill and instruction note are installed in locations that provider loads.
+2. Confirm the MCP registration points to an executable available to that provider.
+3. Start a fresh T3 thread using that provider and home.
+4. Ask it to identify the t3threads skill and call the t3threads `overview` MCP tool.
+5. Check that it reports unreachable machines and other coverage gaps.
+
+To check delegation discovery without creating work, use this prompt:
+
+```text
+How would you spin off three T3 threads for three independent tasks in this
+project and notify this thread when they finish? Identify the tool and outline
+the handoff and notification steps. Do not create threads or watchers.
+```
+
+The agent should select t3threads, use self-contained briefs and separate
+worktrees, preserve requested settings and authority, and describe a watcher
+that wakes the caller. Investigating `t3` subcommands or server APIs first means
+the routing instructions have not taken effect.
+
+`doctor` verifies server access, not agent discovery. If the agent uses CLI
+because MCP is unavailable, report that fallback and the unresolved MCP setup.
+Leave fresh-session checks pending until verified.
+
+Once access is verified, ask things like:
 
 - "Is any other thread working on the billing webhook?"
 - "Summarize what the workstation thread decided about the migration."
@@ -279,8 +326,21 @@ t3threads start --project my-app --checkout worktree --prompt-file task.md
 `--dry-run` shows what t3threads would send without starting anything.
 
 The new thread does not see your current conversation. Write a self-contained
-prompt: the task, the context it needs, what "done" means, and what it must not
-do (for example, push or open PRs).
+brief with the full approved scope, relevant issue list, context, and completion
+criteria. Preserve the user's instructions about commits, PRs, reviews, merges,
+and communication. Include dependencies and who coordinates overlapping changes.
+For coordinated work, include the parent's T3 reference and instructions to reply
+with `send` using the child's own caller reference.
+For several workstreams, write one brief per thread and keep every approved issue
+assigned; do not silently reduce the scope to an initial suggested subset.
+
+Agents use `projects` to resolve the destination and `list` to identify their
+own caller thread by its current worktree. After starting tasks, save the returned
+references, [register a watcher](#get-notified-when-threads-finish) when follow-up
+is requested, and report the threads created or any failures. Requests for T3
+threads create persistent conversations visible in T3, rather than harness
+subagents. Explicit requests authorize starting the specified work without a
+second approval for the same action.
 
 - `--checkout worktree` creates a worktree on a new `t3threads/THREAD_ID` branch,
   based on your local branch. Add `--from-origin` to start from the remote, or
@@ -421,6 +481,12 @@ which wakes it up. If the caller is busy, the message waits until it is idle. To
 record the match without waking a thread, use `--events-only` instead of
 `--caller`.
 
+After registering the watcher, continue independent work or yield the caller's
+turn. Sleep/poll loops keep the caller busy and delay its notification. Save the
+watcher ID so you can inspect delivery or cancel it. Resolve the caller's T3
+reference with `list` using its current worktree; provider conversation IDs are
+different. If the match is ambiguous, resolve it before registering a wake-up.
+
 | Condition | Matches when |
 | --- | --- |
 | `all-completed` | The latest turn of every watched thread succeeded. |
@@ -436,6 +502,11 @@ the command or MCP session exits. The set of watched threads is fixed when you
 create the watcher. If a watched thread is unreachable, the watcher does not fire.
 `all-completed` means that the latest turns succeeded, not that the work is
 ready to merge.
+
+Read the notified threads and verify the requested outcomes, tests, and review
+evidence before taking further authorized action. Register a new watcher if
+follow-up work needs another notification. A separate `any-error` watcher can
+notify you of failures before all threads finish.
 
 `text` and `jev` conditions read recent activity from the watched threads, up
 to 100,000 characters in total. For larger sets, watch fewer threads or use one

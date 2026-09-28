@@ -3,6 +3,16 @@
 Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, project layout, design notes,
 and release steps.
 
+## T3 thread coordination
+
+Use `t3threads` when asked to start, spin off, delegate to, message, or coordinate
+T3 Code threads, or when related threads may contain useful context or overlapping
+work. Prefer its MCP tools; use the `t3threads` CLI when MCP is unavailable.
+An explicit request to create or message threads authorizes that action within
+the requested scope. T3 threads are persistent conversations visible in T3;
+use them when requested instead of harness subagents. Follow
+[the t3threads skill](skills/t3threads/SKILL.md) for handoffs and notifications.
+
 ## Commands
 
 - `npm run check` runs the type checker, tests, and build. It must pass before
