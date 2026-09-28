@@ -132,18 +132,25 @@ dry run. `mode: "plan"` controls interaction mode, not permissions.
 
 ## Messages and replies
 
-Use `send ENV:THREAD_ID --caller ENV:CALLER_ID --prompt TEXT` for durable
-thread-to-thread delivery. Every such send is saved before network access and
-returns `status: queued`, a `queueId`, and a stable `commandId`. Default delivery
-waits for idle. Add `--steer` to deliver during a turn; it is still durable.
-`--enqueue` explicitly selects default idle delivery and cannot combine with
-steer. MCP uses the same options. `--dry-run` contacts both servers for a preview
-but neither stores nor sends a message.
+Use `send ENV:THREAD_ID --caller ENV:CALLER_ID --prompt TEXT` to send immediately.
+It steers a running turn or starts an idle thread and returns `status: accepted`
+with T3's dispatch receipt. `--steer` explicitly selects this default. Direct
+sends do not use the outbox or retry connection/authentication failures in the
+background. If delivery is uncertain, inspect the reported thread and command ID
+before retrying; do not assume an error means the message never arrived.
+
+Use `--enqueue` only when the user asks to wait for idle or requests durable
+queued delivery. It saves the request before network access and returns
+`status: queued`, a `queueId`, and a stable `commandId`. It cannot combine with
+`--steer`. MCP uses the same options; an explicit `steer: false` without enqueue
+rejects a busy recipient instead of queueing. `--dry-run` contacts both servers
+for a preview but neither stores nor sends a message.
 Use `queued --id QUEUE_ID` to inspect delivery/errors and `unqueue QUEUE_ID` to cancel before
 dispatch begins. `accepted` means T3 acknowledged delivery, not task completion.
 Add `--details` for prompts, command/message IDs, and stored dispatch payloads.
-The worker retries offline and temporary authentication failures and reuses the
-same command on uncertain delivery. Do not resend messages already queued.
+For queued messages, the worker retries offline and temporary authentication
+failures and reuses the same command on uncertain delivery. Do not resend
+messages already queued. Direct sends can arrive before older queued messages.
 On macOS, install the background service on each sending machine to recover
 after crashes and logins; `service status` includes sign-in warm-up health.
 For a T3 caller, resolve your own thread with `list` using the current
@@ -161,9 +168,9 @@ An integration outside T3 must use `--external-caller NAME` (`externalCaller`
 in MCP) instead of `--caller`. Exactly one caller option is required. Include
 the original request, source link, and reply instructions in the prompt. The
 external name is self-reported attribution, not verified user identity. Do not
-borrow another thread's identity. External sends remain direct by default, returning an acceptance receipt for
-integrations that own delivery and Stop ordering. They support steer for busy
-threads, enqueue for durable idle delivery, and dry-run.
+borrow another thread's identity. External sends also steer busy threads by
+default and return acceptance receipts. Use enqueue only for requested durable
+idle delivery; dry-run previews either mode.
 
 `accepted` is a dispatch receipt, not task completion. Read the thread's
 status, errors, and messages to check progress; use `read --details` for

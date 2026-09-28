@@ -197,6 +197,8 @@ for handoffs and completion notifications. Preserve the full approved scope in
 task briefs. Inherit destination model and permission settings unless the user
 requests overrides. Use watchers for follow-up; yield when waiting so completion
 notifications can wake the caller.
+Send immediately by default, steering busy threads. Use enqueue only when asked
+to wait for idle with durable retries.
 ```
 
 ### Verify agent access
@@ -240,6 +242,15 @@ Output is compact by default; add `--json` for JSON. `projects`, `list`, `read`,
 `queued`, and `watchers` accept `--details` for full metadata (`details: true`
 in MCP/API). JSON uses the same compact defaults; scripts that need the former
 full output should request details.
+
+**Upgrading from 0.6.x to 0.7.0:** `send` now delivers directly and steers busy
+threads by default for both thread and external callers. Success returns
+`status: accepted` with a dispatch receipt, rather than a `queueId`. Connection
+and authentication failures return immediately; they do not queue the message.
+Use `--enqueue` (`enqueue: true` in MCP/API) when you want durable delivery after
+the recipient becomes idle. Explicit `--steer` also sends directly now. Existing
+queued messages keep their stored delivery behavior. Watcher notifications still
+wait for the caller to be idle.
 
 **Upgrading from 0.5.x to 0.6.0:** T3 Connect machines are now named after
 their T3 label, for example `jessbox:abc123` instead of
@@ -397,30 +408,37 @@ t3threads send local:THREAD_ID --caller local:MY_THREAD_ID --enqueue \
   --prompt 'When this turn finishes, run the integration tests.'
 ```
 
-Thread-to-thread sends persist in the local outbox before either server is
-contacted. They return `status: queued`, a `queueId`, and a stable `commandId`.
-This confirms local storage, not delivery. Use `queued` to check acceptance or
-errors; do not resend a queued message.
+Plain `send` delivers immediately, steering a running turn or starting a new
+turn when the recipient is idle. It returns `status: accepted` with T3's
+dispatch receipt. The recipient keeps its own model and settings. Direct sends
+do not depend on the background worker and do not queue on connection or
+authentication failure. If a dispatch result is uncertain, inspect the reported
+thread and command ID before retrying; the message may already have arrived.
+
+Use `--enqueue` only when you want durable delivery after the recipient becomes
+idle. It saves the message in the local outbox before either server is contacted,
+then returns `status: queued`, a `queueId`, and a stable `commandId`. This confirms
+local storage, not delivery. Use `queued` to check acceptance or errors; do not
+resend a queued message.
 
 Use `queued --id QUEUE_ID` to inspect one delivery. Add `--details` to see its
 prompt, stable command/message IDs, and stored dispatch payload. The default
 view shows delivery status, sender, timestamps, and errors without repeating
 message bodies. `unqueue` returns the same compact status view.
 
-- Plain `send` waits for the recipient to be idle.
-- `--steer` delivers during a running turn, or starts an idle thread. It also
-  survives an offline recipient, locked Mac, or worker restart.
-- `--enqueue` explicitly requests the default wait-for-idle behavior. It cannot
+- `--steer` explicitly selects the default immediate delivery.
+- `--enqueue` requests durable delivery when idle. It cannot
   be combined with `--steer`.
+- In MCP/API, `steer: false` requests direct delivery only if idle; a busy thread
+  returns `THREAD_BUSY` without queueing.
 
-The worker retries temporary authentication and connection failures. Messages
-arrive in order per recipient. A deleted, archived, or missing thread fails
+For queued messages, the worker retries temporary authentication and connection
+failures and preserves queue order per recipient. Direct sends do not wait behind
+queued messages. A deleted, archived, or missing queued recipient fails
 visibly in `queued`. Use `unqueue QUEUE_ID` to cancel before dispatch starts.
 After dispatch starts, recovery reuses the frozen command and message IDs so
 T3 can deduplicate a lost receipt. `--dry-run` requires reachable servers and
 previews the command without saving or delivering it.
-
-The recipient keeps its own model and settings.
 
 `--caller` is the T3 thread that sends the message. The recipient sees the
 sender's title and a reply address, marked as a message from another agent, not
@@ -444,17 +462,17 @@ Cross-machine replies use the sender machine's name, such as
 Integrations outside T3 use `--external-caller NAME` instead of `--caller`:
 
 ```sh
-t3threads send local:THREAD_ID --external-caller jessbot --steer \
+t3threads send local:THREAD_ID --external-caller jessbot \
   --prompt-file /private/path/slack-request.txt
 ```
 
 Supply exactly one caller option. External messages identify the integration
 without inventing a T3 sender thread. Include the original request, its source
 link, and instructions for replying in the prompt. The caller name is a label
-supplied by the integration, not a verified user identity. External callers can
-use direct delivery by default: success means `accepted`, and a busy thread
-requires `--steer`. This preserves receipt and Stop ordering for integrations
-such as jessbot that already own their outgoing lifecycle. External callers can
+supplied by the integration, not a verified user identity. External callers also
+send directly and steer busy threads by default. Success means `accepted`, so
+integrations such as jessbot can use the receipt to order their next action.
+External callers can
 use `--enqueue` for durable delivery and `--dry-run` for a preview.
 
 Queued messages survive restarts and crashes, and a retry after a crash does not

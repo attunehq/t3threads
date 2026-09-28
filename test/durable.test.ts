@@ -64,7 +64,7 @@ test("fresh relay tokens can be minted from a cached encrypted sign-in without u
   assert.equal(await nativeRelayToken({ home: f.dir }, undefined, new State(state.directory), locked), "renewed-2");
 });
 
-test("send persists through Fetch before any server is reachable, then delivers after restart with stable IDs", async t => {
+test("explicit enqueue persists through Fetch before servers are reachable, then delivers after restart with stable IDs", async t => {
   const f = await fixture(t), state = new State(f.dir + "/state");
   const previous = process.env.T3THREADS_STATE_DIR;
   process.env.T3THREADS_STATE_DIR = state.directory;
@@ -73,14 +73,14 @@ test("send persists through Fetch before any server is reachable, then delivers 
   await writeFile(f.dir + "/userdata/server-runtime.json", JSON.stringify({ origin: "http://127.0.0.1:1" }));
   const response = await createCli().fetch(new Request("http://cli/send/local:t1", {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ config: f.configPath, caller: "local:t1", prompt: "Reply when online", steer: true }),
+    body: JSON.stringify({ config: f.configPath, caller: "local:t1", prompt: "Reply when online", enqueue: true }),
   }));
   const result = await response.json() as { data: { status: string; queueId: string; commandId: string } };
   assert.equal(result.data.status, "queued");
   await tickQueue(state, undefined, 1000);
   assert.equal(state.get<QueuedMessage>("message", result.data.queueId)?.error?.code, "SERVER_UNREACHABLE");
   await writeFile(f.dir + "/userdata/server-runtime.json", JSON.stringify({ origin: f.target.origin }));
-  f.stored.get("t1")!.latestTurn = { state: "running" };
+  f.control.startRunning = true;
   f.control.loseReceipt = true;
   await tickQueue(new State(state.directory), undefined, 6000);
   const dispatched = state.get<QueuedMessage>("message", result.data.queueId)!;

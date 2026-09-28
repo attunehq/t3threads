@@ -12,6 +12,8 @@ An explicit request to create or message threads authorizes that action within
 the requested scope. T3 threads are persistent conversations visible in T3;
 use them when requested instead of harness subagents. Follow
 [the t3threads skill](skills/t3threads/SKILL.md) for handoffs and notifications.
+Send immediately by default, steering busy threads. Use enqueue only when asked
+to wait for idle with durable retries.
 
 ## Commands
 
