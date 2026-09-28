@@ -1,4 +1,4 @@
 interface:
   display_name: "T3 Threads"
-  short_description: "Search, summarize, and coordinate T3 threads across machines"
-  default_prompt: "Use $t3threads to find relevant T3 Code conversations for this project."
+  short_description: "Start, find, and coordinate T3 threads across machines"
+  default_prompt: "Use $t3threads to start a T3 thread for the task I describe and notify me when it finishes."
