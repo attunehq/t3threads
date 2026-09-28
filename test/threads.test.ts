@@ -73,7 +73,7 @@ test("project/model selection rejects ambiguity and preserves provider options",
   assert.throws(() => selection({ ...project, defaultModelSelection: null }), /no default model/);
 });
 
-test("busy or archived threads cannot be resumed implicitly", () => {
+test("idle-only commands reject busy or archived threads", () => {
   assert.throws(() => sendCommand({ ...thread, latestTurn: { state: "running" } }, "Go"), /running/);
   assert.throws(() => sendCommand({ ...thread, archivedAt: "yesterday" }, "Go"), /Restore/);
 });
@@ -108,9 +108,8 @@ test("send steering and enqueue previews share validation and attribution throug
     assert.equal(f.commands.length, 0);
   }
   const sent = await call({ steer: true });
-  assert.equal(sent.data.status, "queued");
-  await tickQueue(state);
-  assert.equal(state.get<QueuedMessage>("message", sent.data.queueId)?.status, "accepted");
+  assert.equal(sent.data.status, "accepted");
+  assert.equal(state.list("message").length, 0);
   assert.equal(f.commands.length, 1);
   assert.equal(f.stored.get("t1")!.latestTurn?.state, "running");
   f.stored.get("t1")!.archivedAt = "today";
@@ -132,7 +131,7 @@ test("external callers steer with attribution and source context without a sende
   assert.equal((await call({ caller: "local:t1", steer: true })).error.code, "INVALID_ARGUMENT");
   assert.equal((await call({ externalCaller: undefined })).error.code, "INVALID_ARGUMENT");
   assert.equal((await call({ externalCaller: " " })).ok, false);
-  assert.equal((await call()).error.code, "THREAD_BUSY");
+  assert.equal((await call({ steer: false })).error.code, "THREAD_BUSY");
   assert.equal((await call({ steer: true, enqueue: true })).error.code, "INVALID_ARGUMENT");
   for (const mode of ["steer", "enqueue"]) {
     const preview = await call({ [mode]: true, dryRun: true });
@@ -145,7 +144,7 @@ test("external callers steer with attribution and source context without a sende
     assert.equal(preview.data.command.interactionMode, thread.interactionMode);
     assert.equal(f.commands.length, 0);
   }
-  assert.equal((await call({ steer: true })).data.status, "accepted");
+  assert.equal((await call()).data.status, "accepted");
   assert.equal(f.commands.length, 1);
   assert.ok(f.commands[0]!.message.text.endsWith(prompt));
   f.stored.get("t1")!.archivedAt = "today";
@@ -226,7 +225,7 @@ test("Fetch API shares CLI validation and executes start/read/send through RPC",
   assert.match(preview.data.command.message.text, /agent message:.*; not the user/);
   assert.ok(preview.data.command.message.text.endsWith("\n\nTest it\nKeep the details.\n"));
   assert.equal((await call(`send/${id}`, sendOptions)).ok, true);
-  await tickQueue(state);
+  assert.equal(state.list("message").length, 0);
   assert.equal(f.commands[1]?.message.text, preview.data.command.message.text);
   assert.equal(f.commands[1]?.runtimeMode, "approval-required");
   assert.equal(f.commands[1]?.interactionMode, "plan");
@@ -249,7 +248,7 @@ test("send resolves caller independently of recipient environment and provides a
   }) }));
   const result = await response.json() as { ok: boolean };
   assert.equal(result.ok, true, JSON.stringify(result));
-  await tickQueue(state);
+  assert.equal(state.list("message").length, 0);
   assert.equal(sender.commands.length, 0);
   assert.equal(recipient.commands.length, 1);
   const text = recipient.commands[0]!.message.text;

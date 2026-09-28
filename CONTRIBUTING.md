@@ -156,12 +156,17 @@ process delivers at a time. Before dispatch, the worker persists a stable comman
 ID. After a crash or lost response, it reuses that ID so T3's command receipts
 deduplicate the retry.
 
-Thread callers save the request, reply reference, and stable command/message
-IDs before network access. The worker resolves sender attribution and recipient
+Both thread and external callers send directly by default, including steering
+busy recipients. They return a dispatch receipt or an immediate error and never
+fall back to the outbox. Explicit `steer: false` rejects busy recipients. Direct
+sends can overtake queued work; only explicit enqueue participates in queue order.
+
+Explicit enqueue saves the request and stable command/message IDs before network
+access and waits for idle. The worker resolves sender attribution and recipient
 settings, pins the destination environment, then saves the exact command before
 dispatch. Pending requests survive authentication failures; a dispatching
-request never needs the sender again. External callers retain direct delivery
-unless they request enqueue, preserving receipt-based lifecycle integrations.
+request never needs the sender again. Previously stored steering requests keep
+their delivery behavior; changing the CLI default does not rewrite the outbox.
 Queued messages are delivered in enqueue order per recipient, including
 environment aliases once their identity has been resolved. The idle check and the dispatch are separate operations, so
 another client can start a turn between them.
