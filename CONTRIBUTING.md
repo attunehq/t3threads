@@ -51,6 +51,7 @@ that ships to users.
 | `src/environments.ts` | Configuration, environment resolution, and cross-machine fan-out. |
 | `src/connect.ts`, `src/native-auth.ts` | T3 Connect through T3's native macOS credential cache. |
 | `src/threads.ts` | Thread reads, search, and `start`/`send` commands. |
+| `src/routing.ts` | Read-only desktop Auto balance preferences, shared-project matching, and machine selection. |
 | `src/intelligence.ts` | Summaries, semantic `find`, and Jev. |
 | `src/watchers.ts`, `src/queue.ts`, `src/worker.ts` | Watchers, queued messages, and the delivery worker. |
 | `src/service.ts`, `src/runtime-update.ts` | macOS LaunchAgent and upgrade detection. |
@@ -74,13 +75,33 @@ Reads use T3's HTTP shell and per-thread snapshots. Writes use
 T3's thread and worktree bootstrap; the HTTP dispatch route does not, so do not
 use it for writes.
 
+New-thread routing reads `userdata/client-settings.json` from the invoking
+local T3 home. This desktop-only preference has no server RPC. Read only the
+Auto balance and sidebar project grouping fields; do not write the file.
+`--env` supplies the source project, while `--pin-env` opts out of balancing.
+Browser-only settings are not available to the CLI.
+
+Shared projects match T3's `repositoryIdentity.canonicalKey` and configured
+repository/path grouping, never just titles or coincidentally equal paths.
+Ambiguous destination groups are reported and excluded. T3's
+`server.getConfig` supplies candidate settings/provider availability and
+`server.getHostResources` supplies CPU/memory data. Selection matches the
+desktop's `weight * cpuCount * (1 - cpuUtilization) * freeMemoryFraction`,
+excluding zero weights, CPU utilization at least 95%, and at most 5% free
+memory. Sample receipt time avoids remote clock skew; samples expire after
+15 seconds. Ties prefer the source environment, then environment name.
+Routing failures remain visible. Once chosen, a destination is never replaced
+after a dispatch failure; errors include its full thread reference.
+
 New-thread model and permissions share one `server.getSettings` snapshot from
 the destination API. `projectSettingsOverrides[projectId]` overrides the machine's
 `defaultModelSelection` and `defaultRuntimeMode`, matching T3's
 `resolveProjectSettings`. Explicit CLI options override the corresponding
-values; fully explicit model/provider and permission skip the settings lookup.
+values; fully explicit model/provider and permission skip the settings lookup
+for pinned/unbalanced starts. Balanced starts use the same settings snapshot
+from `server.getConfig` that was checked for provider availability.
 Missing or invalid effective settings fail before dispatch. Do not substitute
-the caller's settings or read T3's settings files. T3's cross-machine settings
+the caller's settings or read the server's `settings.json`. T3's cross-machine settings
 controls persist values to each selected server; the destination is authoritative.
 
 Before `projectSettingsFolded` is true, a legacy project model sits above the

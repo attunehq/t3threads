@@ -101,6 +101,7 @@ your saved sign-in. Here is what it uses:
 | Data | Why t3threads needs it |
 | --- | --- |
 | T3's runtime metadata in `~/.t3/userdata/server-runtime.json` | Find the running local server. It then uses T3's CLI to issue a temporary session. |
+| T3's desktop preferences in `~/.t3/userdata/client-settings.json` | Read Auto balance, machine weights, and shared-project grouping for new threads. t3threads never writes this file. |
 | T3's saved sign-in in `~/.t3/userdata/clerk-tokens.json` and its macOS Safe Storage Keychain item | Unlock the existing sign-in and authenticate with T3's sign-in provider and Connect relay to reach your linked machines. |
 | Project metadata, thread messages and status, and model settings | Read and coordinate your work through T3's HTTP and WebSocket APIs. t3threads never opens T3's database or changes its credential files. |
 | Its own [local state directory](#your-data) | Store cached thread text, model results, queued messages, watchers, and per-machine connection credentials, keys, and a cached T3 client sign-in for unattended renewal. |
@@ -330,11 +331,31 @@ not as proof that tests passed or a PR is ready.
 ### Start a new thread
 
 ```sh
-t3threads start --project my-app --checkout worktree --prompt-file task.md --dry-run
-t3threads start --project my-app --checkout worktree --prompt-file task.md
+t3threads start --project my-app --checkout worktree --branch main --prompt-file task.md --dry-run
+t3threads start --project my-app --checkout worktree --branch main --prompt-file task.md
 ```
 
-`--dry-run` shows what t3threads would send without starting anything.
+Replace `main` with the intended base branch. `--dry-run` shows the chosen
+machine and what t3threads would send without starting anything. Auto balance
+checks fresh load on each call, so a later start can choose a different machine.
+
+New threads respect the invoking desktop's **Auto balance** setting, including
+machine preference weights. With it enabled, t3threads chooses an eligible
+machine in the same shared project using T3's free CPU and memory scoring.
+`--env NAME` identifies where to look up the project; it does not disable Auto
+balance. Use `--env NAME --pin-env` when the task must run on that machine.
+MCP/API uses `pinEnv: true`. Agents should pin only when you request a machine.
+
+The setting is read from the local T3 home's desktop preferences on each start,
+even when `--env` names a remote machine. Browser-only preferences are separate.
+If Auto balance is off or the desktop preference file is absent, starts use the
+selected environment as before. Projects without a shared repository identity,
+or grouped separately in T3, also stay on that environment.
+
+Balanced results include `routing` with machine scores, exclusions, and any
+unreachable-machine errors. If no machine is eligible, the start fails before
+creating a thread. Zero-weight machines and machines without a usable provider
+are excluded. `send` continues on the existing thread's machine.
 
 The new thread does not see your current conversation. Write a self-contained
 brief with the full approved scope, relevant issue list, context, and completion
@@ -356,7 +377,8 @@ second approval for the same action.
 - `--checkout worktree` creates a worktree on a new `t3threads/THREAD_ID` branch,
   based on your local branch. Add `--from-origin` to start from the remote, or
   `--skip-setup` to skip the project's setup script. On a remote machine, also
-  pass `--branch BASE`.
+  pass `--branch BASE`. Supply it when Auto balance may choose a remote machine,
+  too; that branch must exist there.
 - `--checkout current` works in the project's existing checkout.
 - The thread inherits the destination project's model setting, then that
   machine's default, including the provider instance and model options. A

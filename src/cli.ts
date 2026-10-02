@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { service } from "./service.js";
 import { messageOutput, queuedOutput, threadOutput, watchOutput } from "./output.js";
+import { routeStart } from "./routing.js";
 
 const text = z.string().trim().min(1);
 const details = z.boolean().default(false).describe("Include full metadata and stored payloads instead of the compact view");
@@ -71,14 +72,16 @@ export function createCli(options: { signal?: AbortSignal } = {}) {
   const modelEnv = text.default("local").describe("Local T3 environment whose saved text-generation provider/model to use");
 
   const cli = Cli.create("t3threads", {
-    version: "0.7.0",
+    version: "0.8.0",
     description: "Start, find, message, and coordinate T3 Code agent threads across machines.",
     update: false,
     mcp: { tools: { discovery: "direct" }, instructions: `Use t3threads when asked to start, spin off, delegate to, message, or coordinate T3 Code threads, or find related and overlapping work. These are persistent conversations visible in T3; use them when requested instead of harness subagents. Prefer these MCP tools; the t3threads CLI exposes the same commands when MCP is unavailable. Use this integration before investigating t3 subcommands or server APIs. Explicit requests to start or message threads authorize those actions within the requested scope without repeated approval. Reading related work does not authorize resuming it or delegating unrelated tasks.
 
-To delegate: resolve the destination project with projects; identify your own caller ref with list by matching the current worktree, not a provider conversation ID. Resolve ambiguous caller matches before sending messages or registering wake-ups. Call start for each requested workstream, normally with checkout=worktree. Supply a self-contained prompt: new threads do not inherit the conversation. Preserve the full approved scope and issue list, completion criteria, dependencies, PR/review/merge and communication instructions, and who coordinates overlaps. Save returned refs; inspect a reported thread before retrying a failed start. Accepted means dispatched, not completed.
+To delegate: resolve the source project with projects; identify your own caller ref with list by matching the current worktree, not a provider conversation ID. Resolve ambiguous caller matches before sending messages or registering wake-ups. Call start for each requested workstream, normally with checkout=worktree. Supply a self-contained prompt: new threads do not inherit the conversation. Preserve the full approved scope and issue list, completion criteria, dependencies, PR/review/merge and communication instructions, and who coordinates overlaps. Save returned refs; inspect a reported thread before retrying a failed start. Accepted means dispatched, not completed.
 
-Start inherits destination project model/provider/options and permissions, then machine defaults; never copy caller settings. Override only as requested and for the requested role; a review model is not automatically the worker model. modelOptions (MCP/API) or modelOptionsJson (CLI) replaces all model options. Verify modelSelection/runtimeMode with dryRun. Remote worktrees require branch. Use current checkout only when sharing fits the task.
+Start respects the invoking desktop's Auto balance toggle, machine weights and shared-project grouping, read-only from its local T3 client-settings.json. env identifies the project lookup environment; it does not pin execution. Leave pinEnv false unless the user explicitly requests a particular machine. When balancing, T3's weighted free CPU/memory score selects an eligible shared-project destination. Save the returned ref, which can name another machine. dryRun shows the chosen environment and routing scores/exclusions/errors; a later start checks fresh load. Offline machines remain unknown (routing.complete=false). No eligible machine means an error, never permission to pin silently. Disabled/missing desktop preferences or unshared projects keep the selected environment. Browser-only preferences are separate. send never moves an existing thread.
+
+Start inherits destination project model/provider/options and permissions, then machine defaults; never copy caller settings. Override only as requested and for the requested role; a review model is not automatically the worker model. modelOptions (MCP/API) or modelOptionsJson (CLI) replaces all model options. Verify modelSelection/runtimeMode with dryRun. Remote worktrees require branch, including when Auto balance may choose a remote machine; supply the intended base branch. Use current checkout only when sharing fits the task.
 
 For ongoing coordination, watch the explicit returned refs with caller set to your thread and condition=all-completed; add a separate any-error watcher when early failure notification is needed. Save watcher IDs and report created threads and any failures. Continue independent work or yield so the caller becomes idle and the worker can wake it; avoid sleep/poll loops. Read notified results and verify completion criteria, tests, and review evidence before further authorized actions. all-completed means successful latest turns, not PR readiness; text/jev allow custom conditions. Watchers fire once; rearm for follow-up work. Inspect watchers for delivery/errors and fired decisions; details adds per-thread evidence.
 
@@ -93,8 +96,8 @@ T3 owns sign-in and text-model selection. Warm Connect credentials with environm
     catch (error) {
       if (error instanceof Errors.IncurError) throw error;
       if (error instanceof CliError) {
-        const details = error.details as { threadId?: string; commandId?: string } | undefined;
-        throw new Errors.IncurError({ code: error.code, message: error.message + (details?.threadId ? ` Thread: ${details.threadId}. Command: ${details.commandId}.` : ""), retryable: false });
+        const details = error.details as { threadId?: string; commandId?: string; ref?: string } | undefined;
+        throw new Errors.IncurError({ code: error.code, message: error.message + (details?.threadId ? ` Thread: ${details.threadId}. Command: ${details.commandId}.${details.ref ? ` Reference: ${details.ref}.` : ""}` : ""), retryable: false });
       }
       throw new Errors.IncurError({ code: "INTERNAL_ERROR", message: "Operation failed. Check configuration and T3 availability.", retryable: false });
     }
@@ -243,8 +246,10 @@ T3 owns sign-in and text-model selection. Warm Connect credentials with environm
       },
     })
     .command("start", {
-      description: "Start or spin off a persistent T3 Code agent thread for a delegated task. Use when the user asks for new T3 threads; include a self-contained brief with the full approved scope. Not idempotent: inspect a reported thread before retrying.", mcp: write,
+      description: "Start or spin off a persistent T3 Code agent thread, respecting desktop Auto balance unless pinEnv is requested. Include a self-contained brief with the full approved scope. Not idempotent: inspect the reported environment and thread before retrying.", mcp: write,
       options: z.object({ ...common, ...promptOptions,
+        env: text.optional().describe("Environment containing the project (default local). Auto balance may choose another shared-project machine; use pinEnv only to require this one."),
+        pinEnv: z.boolean().default(false).describe("Require the selected environment, overriding T3 Auto balance. Use only when the user explicitly requests a particular machine."),
         project: text.describe("Existing project ID, exact title, or workspace path"),
         checkout: z.enum(["worktree", "current"]).describe("Separate worktree or the project's current checkout"),
         title: text.optional(), provider: text.optional().describe("Override provider instance; requires --model"), model: text.optional().describe("Override model; otherwise inherit destination project/machine settings and options. Without --provider, use the inherited provider."),
@@ -256,6 +261,7 @@ T3 owns sign-in and text-model selection. Warm Connect credentials with environm
       }),
       async run(c) {
         requirePost(c.request);
+        if (c.options.provider && !c.options.model) fail("MODEL_REQUIRED", "Pass --model when overriding --provider.");
         if (c.options.modelOptions !== undefined && c.options.modelOptionsJson !== undefined) fail("INVALID_ARGUMENT", "Supply modelOptions or modelOptionsJson, not both.");
         let modelOptions = c.options.modelOptions;
         if (c.options.modelOptionsJson !== undefined) {
@@ -270,12 +276,17 @@ T3 owns sign-in and text-model selection. Warm Connect credentials with environm
         if (!worktree && (c.options.fromOrigin || c.options.skipSetup)) fail("INVALID_ARGUMENT", "--from-origin and --skip-setup require --checkout worktree.");
         return withTarget(c.options, c.request, async (api, target) => {
           const project = selectProject((await catalog(api)).projects, expandProject(c.options.project));
-          if (worktree && target.descriptor.capabilities?.requiredWorktreeBootstrap !== true) fail("UNSUPPORTED_SERVER", "This server cannot guarantee worktree creation. Update T3 first.");
-          const branch = c.options.branch ?? (target.home ? await localBranch(project) : null);
-          const { permission, model } = await startSelections(api, project, c.options);
-          if (modelOptions !== undefined) model.options = modelOptions;
-          const command = startCommand(project, { prompt, title: c.options.title, model, permission, mode: c.options.mode, worktree, branch, startFromOrigin: c.options.fromOrigin, setup: !c.options.skipSetup });
-          return { ...context(target), ref: `${target.name}:${command.threadId}`, ...(c.options.dryRun ? { dryRun: true, command } : await dispatch(api, command)) };
+          const routed = await routeStart(c.options, { target, project }, signalFor(c.request));
+          const destination = routed?.target ?? target, destinationProject = routed?.project ?? project;
+          const start = async (api: Api) => {
+            if (worktree && destination.descriptor.capabilities?.requiredWorktreeBootstrap !== true) fail("UNSUPPORTED_SERVER", "This server cannot guarantee worktree creation. Update T3 first.");
+            const branch = c.options.branch ?? (destination.home ? await localBranch(destinationProject) : null);
+            const { permission, model } = routed?.selections ?? await startSelections(api, destinationProject, c.options);
+            if (modelOptions !== undefined) model.options = modelOptions;
+            const command = startCommand(destinationProject, { prompt, title: c.options.title, model, permission, mode: c.options.mode, worktree, branch, startFromOrigin: c.options.fromOrigin, setup: !c.options.skipSetup });
+            return { ...context(destination), ref: `${destination.name}:${command.threadId}`, ...(routed ? { routing: routed.routing } : {}), ...(c.options.dryRun ? { dryRun: true, command } : await dispatch(api, command)) };
+          };
+          return destination === target ? start(api) : withApi(destination, start, signalFor(c.request));
         });
       },
     })
