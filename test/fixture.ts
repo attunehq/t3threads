@@ -15,7 +15,7 @@ export const descriptor = { environmentId: "test-env", serverVersion: "0.0.43-te
 export const json = (res: ServerResponse, value: unknown, status = 200) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(value)); };
 
 export async function fixture(t: TestContext, handler?: (req: IncomingMessage, res: ServerResponse) => boolean | undefined, environmentId = "test-env") {
-  const environmentDescriptor = { ...descriptor, environmentId };
+  const environmentDescriptor = { ...structuredClone(descriptor), environmentId };
   const dir = await mkdtemp(join(tmpdir(), "t3threads-test-"));
   const authLog = join(dir, "auth.jsonl"), authCli = join(dir, "auth.mjs");
   await writeFile(authCli, `import {appendFileSync} from 'node:fs';const args=process.argv.slice(2);if(args[0]==='--version')console.log('t3 v0.0.43-test');else {appendFileSync(${JSON.stringify(authLog)},JSON.stringify(args)+'\\n');if(args.includes('issue'))console.log(JSON.stringify({sessionId:'test-session',token:'test-secret'}));}`);
@@ -23,6 +23,9 @@ export async function fixture(t: TestContext, handler?: (req: IncomingMessage, r
   const projects = [structuredClone(project)];
   const settings: Record<string, unknown> = { defaultModelSelection: project.defaultModelSelection, projectSettingsFolded: true, defaultRuntimeMode: "approval-required", projectSettingsOverrides: {}, textGenerationModelSelection: project.defaultModelSelection, providerInstances: { "codex-work": { driver: "codex", enabled: true, config: {} } } };
   const rpcMethods: string[] = [];
+  const rpcFailures = new Set<string>();
+  const providers = [{ instanceId: "codex-work", driver: "codex", enabled: true, installed: true, status: "ready", auth: { status: "authenticated" }, availability: "available" }];
+  const resources = { sampledAt: Date.now(), cpuUtilization: 0.1 as number | null, cpuCount: 8, availableMemoryBytes: 16e9, totalMemoryBytes: 32e9 };
   const stored = new Map<string, Thread>([[thread.id, structuredClone(thread)]]);
   const server = createServer((req, res) => {
     const url = new URL(req.url!, "http://localhost");
@@ -52,8 +55,10 @@ export async function fixture(t: TestContext, handler?: (req: IncomingMessage, r
       if (frame._tag === "Pong") { control.pinged = true; return; }
       rpcMethods.push(frame.tag);
       if (control.disconnect) return ws.close();
-      if (control.reject) return ws.send(JSON.stringify({ _tag: "Exit", requestId: frame.id, exit: { _tag: "Failure", cause: [{ error: { message: "test-secret" } }] } }));
+      if (control.reject || rpcFailures.has(frame.tag)) return ws.send(JSON.stringify({ _tag: "Exit", requestId: frame.id, exit: { _tag: "Failure", cause: [{ error: { message: "test-secret" } }] } }));
       if (frame.tag === "server.getSettings") return ws.send(JSON.stringify({ _tag: "Exit", requestId: frame.id, exit: { _tag: "Success", value: settings } }));
+      if (frame.tag === "server.getConfig") return ws.send(JSON.stringify({ _tag: "Exit", requestId: frame.id, exit: { _tag: "Success", value: { settings, providers } } }));
+      if (frame.tag === "server.getHostResources") return ws.send(JSON.stringify({ _tag: "Exit", requestId: frame.id, exit: { _tag: "Success", value: resources } }));
       if (frame.tag !== "orchestration.dispatchCommand") throw Error("Wrong RPC method");
       const command = frame.payload as ReturnType<typeof startCommand>;
       const prior = commands.findIndex(c => c.commandId === command.commandId);
@@ -85,7 +90,7 @@ export async function fixture(t: TestContext, handler?: (req: IncomingMessage, r
   await writeFile(configPath, JSON.stringify({ environments: { local: { home: dir, command: [process.execPath, authCli] } } }));
   const target: Target = { name: "local", home: dir, origin, descriptor: environmentDescriptor, config: { command: [process.execPath, authCli] } };
   t.after(async () => { for (const ws of wss.clients) ws.terminate(); wss.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); });
-  return { dir, authLog, configPath, target, api: new Api(target, "test-secret"), commands, stored, control, settings, rpcMethods, projects,
+  return { dir, authLog, configPath, target, api: new Api(target, "test-secret"), commands, stored, control, settings, rpcMethods, rpcFailures, providers, resources, projects,
     async authActions() { return (await readFile(authLog, "utf8")).trim().split("\n").map(line => (JSON.parse(line) as string[])[2]); },
   };
 }

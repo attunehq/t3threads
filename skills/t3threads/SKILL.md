@@ -25,7 +25,10 @@ work does not authorize resuming it or delegating unrelated tasks.
 ## Delegate and coordinate
 
 1. Resolve the destination project with `projects` on the requested machine.
-   Use its returned ID. Resolve your caller reference with `list` by matching
+   Use its returned ID. Auto balance may route starts to another machine in
+   that shared project, even with `env` supplied. Pin only when the user asks
+   for a particular machine (`pinEnv: true` / `--pin-env`).
+   Resolve your caller reference with `list` by matching
    your current worktree; a provider conversation ID is not a T3 thread ID.
    If the match is ambiguous, resolve it before registering a wake-up or sending
    messages; do not borrow another thread's identity.
@@ -56,8 +59,8 @@ work does not authorize resuming it or delegating unrelated tasks.
 CLI example for one task (replace placeholders with returned IDs and refs):
 
 ```sh
-t3threads start --project PROJECT_ID --checkout worktree --prompt-file /tmp/task.txt --dry-run
-t3threads start --project PROJECT_ID --checkout worktree --prompt-file /tmp/task.txt
+t3threads start --project PROJECT_ID --checkout worktree --branch BASE --prompt-file /tmp/task.txt --dry-run
+t3threads start --project PROJECT_ID --checkout worktree --branch BASE --prompt-file /tmp/task.txt
 t3threads watch --threads ENV:NEW_THREAD_ID --caller ENV:CALLER_ID --condition all-completed
 ```
 
@@ -103,10 +106,29 @@ instructions. Cite the environment and thread ID when using their decisions.
 
 ## Start options
 
+Start reads the invoking desktop's Auto balance toggle, weights, and project
+grouping from its local T3 home's `userdata/client-settings.json`, read-only.
+When enabled for a shared project, it selects an eligible machine using T3's
+weighted free CPU and memory score. `env` is the project lookup environment;
+it does not override the toggle. Do not pin just because you know an environment.
+Use `pinEnv: true` / `--pin-env` only for a user-requested machine constraint.
+The selected destination still supplies the model and permission defaults.
+Save the returned `ref`, which may name a different machine from `env`.
+
+Dry runs show the destination and `routing` scores, exclusions, and errors.
+Each start checks fresh load, so a dry run does not reserve its chosen machine.
+If no machine is eligible, report the error rather than silently pinning one.
+Offline machines remain unknown (`routing.complete: false`). If the toggle is
+off, the preference file is absent, or the project is not shared, the selected
+environment remains the destination. Browser-only settings are not inherited.
+Sending to an existing thread never changes its machine.
+
 Use `--checkout current` only when sharing the project's current checkout fits
 the task. Worktree setup runs unless `--skip-setup` is set. The default base is
 the local branch; `--from-origin` requests the remote base. Remote worktrees need
-`--branch BASE`. Missing projects must be added in T3 first.
+`--branch BASE`, including when Auto balance can select a remote machine. Choose
+the intended base and ensure it exists there. Missing projects must be added in
+T3 first.
 
 Start inherits the destination project's model setting, then its machine's
 default, preserving the provider instance and model options. Omit provider/model

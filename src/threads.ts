@@ -4,7 +4,7 @@ import { Api, fail, object, run } from "./client.js";
 export type Model = { instanceId: string; model: string; options?: unknown };
 export const permissionModes = ["approval-required", "auto-accept-edits", "auto", "full-access"] as const;
 export type PermissionMode = typeof permissionModes[number];
-export type Project = { id: string; title: string; workspaceRoot: string; defaultModelSelection: Model | null; deletedAt?: string | null };
+export type Project = { id: string; title: string; workspaceRoot: string; defaultModelSelection: Model | null; deletedAt?: string | null; repositoryIdentity?: { canonicalKey: string; rootPath?: string } | null };
 export type Thread = {
   id: string; projectId: string; title: string; updatedAt: string; archivedAt?: string | null; deletedAt?: string | null; settledAt?: string | null;
   hasPendingApprovals?: boolean; hasPendingUserInput?: boolean; hasActionableProposedPlan?: boolean; backgroundLiveness?: string | null;
@@ -211,7 +211,7 @@ export async function dispatch(api: Api, command: { type: string; threadId: stri
     if (typeof receipt.sequence !== "number") fail("INVALID_RESPONSE", "T3 returned an invalid dispatch receipt. Inspect the thread before retrying.");
     return { threadId: command.threadId, commandId: command.commandId, status: "accepted", sequence: receipt.sequence };
   } catch (error) {
-    if (error instanceof Error) Object.assign(error, { details: { ...("details" in error ? object(error.details ?? {}) : {}), threadId: command.threadId, commandId: command.commandId } });
+    if (error instanceof Error) Object.assign(error, { details: { ...("details" in error ? object(error.details ?? {}) : {}), environment: api.target.name, environmentId: api.target.descriptor.environmentId, ref: `${api.target.name}:${command.threadId}`, threadId: command.threadId, commandId: command.commandId } });
     throw error;
   }
 }

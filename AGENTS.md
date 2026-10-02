@@ -30,8 +30,8 @@ to wait for idle with durable retries.
 - Give read commands the `readOnly` MCP annotation and commands that change
   threads the `write` annotation. Commands that change state must call
   `requirePost`.
-- Never open T3's database or change T3's credential files. Reach T3 only through
-  its HTTP and WebSocket APIs.
+- Never open T3's database or change T3's credential files. Reads may use local
+  files, including desktop preferences. Change T3 state only through its APIs.
 - Send writes through `orchestration.dispatchCommand` over WebSocket. The HTTP
   dispatch route skips T3's thread and worktree bootstrap.
 - Never print, log, or pass tokens in process arguments. Do not return raw errors
