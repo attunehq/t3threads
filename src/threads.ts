@@ -11,10 +11,37 @@ export type Thread = {
   modelSelection: Model; runtimeMode: string; interactionMode: string; branch: string | null; worktreePath: string | null;
   latestTurn?: { state: string } | null; session?: { status: string; activeTurnId: string | null; lastError: string | null } | null;
   messages?: { id: string; role: string; text: string; createdAt: string; streaming?: boolean; attachments?: unknown[] }[];
+  /** Protocol 2 only: the run a steering message targets. */
+  activeRunId?: string | null;
 };
 export type Snapshot = { thread: Thread; snapshotSequence: number; page?: { beforeCursor: string | null; hasMore: boolean } };
 
+// Protocol 2 run states that mean work is in progress.
+const activeRunStates = ["preparing", "starting", "running", "waiting"];
+
+/** Maps a protocol 2 shell or projection thread onto the protocol 1 fields the rest of the CLI reads. */
+function fromV2(raw: Record<string, unknown>, activeRunId: string | null, status: string): Thread {
+  const active = Boolean(activeRunId) || activeRunStates.includes(status);
+  const pending = raw.pendingRuntimeRequest && typeof raw.pendingRuntimeRequest === "object" ? raw.pendingRuntimeRequest as { kind?: string } : null;
+  return {
+    ...(raw as unknown as Thread),
+    activeRunId,
+    hasPendingApprovals: Boolean(pending && pending.kind !== "user_input"),
+    hasPendingUserInput: pending?.kind === "user_input",
+    session: { status: active ? "running" : status === "failed" ? "error" : "ready", activeTurnId: activeRunId, lastError: typeof raw.lastError === "string" ? raw.lastError : null },
+    latestTurn: { state: active ? "running" : status === "idle" ? "completed" : status },
+  };
+}
+
 export async function catalog(api: Api, archived = false): Promise<{ projects: Project[]; threads: Thread[] }> {
+  if (api.v2) {
+    const data = object(await api.request("/api/orchestration/shell"));
+    if (!Array.isArray(data.projects) || !Array.isArray(data.threads)) fail("INVALID_RESPONSE", "T3 returned an incompatible thread catalog.");
+    const raw = [...data.threads, ...(archived && Array.isArray(data.archivedThreads) ? data.archivedThreads : [])].map(t => object(t));
+    if (data.projects.some((p: unknown) => typeof object(p).id !== "string" || typeof object(p).workspaceRoot !== "string") || raw.some(t => typeof t.id !== "string" || typeof t.projectId !== "string")) fail("INVALID_RESPONSE", "T3 returned an incompatible thread catalog.");
+    const threads = raw.map(t => fromV2(t, typeof t.activeRunId === "string" ? t.activeRunId : null, String(t.activityRunStatus ?? t.status ?? "idle")));
+    return { projects: (data.projects as Project[]).filter(p => !p.deletedAt), threads: threads.filter(t => !t.deletedAt && (archived || !t.archivedAt)) };
+  }
   const data = object(await api.request(archived ? "/api/orchestration/snapshot" : "/api/orchestration/shell"));
   if (!Array.isArray(data.projects) || !Array.isArray(data.threads)) fail("INVALID_RESPONSE", "T3 returned an incompatible thread catalog.");
   const hasStrings = (value: unknown, fields: string[]) => fields.every(key => typeof object(value)[key] === "string");
@@ -41,6 +68,22 @@ export async function readThread(api: Api, id: string, turns = 20, before?: stri
   const query = new URLSearchParams({ turnLimit: String(turns) });
   if (before) query.set("beforeCursor", before);
   const result = object(await api.request(`/api/orchestration/threads/${encodeURIComponent(id)}?${query}`));
+  if (api.v2) {
+    // Protocol 2 returns the whole projection; there is no paging.
+    const projection = object(result.projection);
+    const base = object(projection.thread);
+    const runs = Array.isArray(projection.runs) ? projection.runs.map(r => object(r)) : [];
+    const active = runs.findLast(r => activeRunStates.includes(String(r.status)));
+    const latest = runs.at(-1);
+    const thread = fromV2(base, active && typeof active.id === "string" ? active.id : null, active ? String(active.status) : latest ? String(latest.status) : "idle");
+    thread.messages = (Array.isArray(projection.messages) ? projection.messages : []) as Thread["messages"];
+    if (thread.id !== id) fail("INVALID_RESPONSE", "T3 returned an incompatible thread snapshot.");
+    for (const raw of thread.messages!) {
+      const message = object(raw);
+      if (["id", "role", "createdAt"].some(key => typeof message[key] !== "string") || typeof message.text !== "string") fail("INVALID_RESPONSE", "T3 returned an incompatible message.");
+    }
+    return { thread, snapshotSequence: typeof result.snapshotSequence === "number" ? result.snapshotSequence : 0, page: { hasMore: false, beforeCursor: null } };
+  }
   const thread = object(result.thread);
   if (thread.id !== id || !Array.isArray(thread.messages)) fail("INVALID_RESPONSE", "T3 returned an incompatible thread snapshot.");
   if (result.page) {
@@ -111,7 +154,12 @@ function modelValue(value: unknown): Model {
 
 function modelProviderEnabled(settings: Record<string, unknown>, instanceId: string) {
   const instances = object(settings.providerInstances ?? {});
-  if (!Object.hasOwn(instances, instanceId)) return object(object(settings.providers ?? {})[instanceId] ?? {}).enabled === true;
+  if (!Object.hasOwn(instances, instanceId)) {
+    const legacy = object(settings.providers ?? {});
+    if (Object.hasOwn(legacy, instanceId)) return object(legacy[instanceId]).enabled === true;
+    // T3 0.1.0 (isUnconfiguredDefaultInstanceEnabled): Codex and Claude are on until configured otherwise.
+    return ["codex", "claudeAgent"].includes(instanceId);
+  }
   const provider = object(instances[instanceId]);
   const config = provider.config && typeof provider.config === "object" && !Array.isArray(provider.config) ? provider.config as Record<string, unknown> : {};
   const configEnabled = typeof config.enabled === "boolean" ? config.enabled : undefined;
@@ -201,13 +249,61 @@ ${prompt}`;
 Reply: t3threads send '${sender.replyRef.replaceAll("'", "'\\''")}' --caller YOUR_THREAD_REF --prompt-file REPLY_FILE${sender.replyRef.startsWith("local:") ? "" : `\nDirect-only: replace ${sender.replyRef.slice(0, sender.replyRef.indexOf(":"))} with your configured name for that machine.`}
 
 ${prompt}`;
-  return { type: "thread.turn.start", commandId: crypto.randomUUID(), threadId: thread.id, message: { messageId: crypto.randomUUID(), role: "user", text: prompt, attachments: [] }, modelSelection: thread.modelSelection, runtimeMode: thread.runtimeMode, interactionMode: thread.interactionMode, createdAt: new Date().toISOString() };
+  return { type: "thread.turn.start", commandId: crypto.randomUUID(), threadId: thread.id, message: { messageId: crypto.randomUUID(), role: "user", text: prompt, attachments: [] }, modelSelection: thread.modelSelection, runtimeMode: thread.runtimeMode, interactionMode: thread.interactionMode, createdAt: new Date().toISOString(), ...(thread.activeRunId !== undefined ? { activeRunId: thread.activeRunId } : {}) };
 }
 
-export async function dispatch(api: Api, command: { type: string; threadId: string; commandId: string; [key: string]: unknown }) {
+type Command = { type: string; threadId: string; commandId: string; [key: string]: unknown };
+
+/** Protocol 2: the launchThread RPC input for a protocol 1 thread.turn.start with bootstrap. */
+export function launchInput(command: Command) {
+  const boot = object(command.bootstrap);
+  const create = object(boot.createThread);
+  const message = object(command.message);
+  const prepare = boot.prepareWorktree ? object(boot.prepareWorktree) : null;
+  const workspaceStrategy = prepare
+    ? { type: "worktree", baseRef: prepare.baseBranch, branch: prepare.branch, startFromOrigin: prepare.startFromOrigin === true }
+    : { type: "root", ...(typeof create.branch === "string" && create.branch ? { branch: create.branch } : {}) };
+  return {
+    commandId: command.commandId, threadId: command.threadId, projectId: create.projectId, title: create.title,
+    modelSelection: command.modelSelection, runtimeMode: command.runtimeMode, interactionMode: command.interactionMode,
+    workspaceStrategy, initialMessage: { messageId: message.messageId, text: message.text, attachments: [] },
+  };
+}
+
+/** Protocol 2: maps a protocol 1 command onto the V2 command the server accepts. */
+export function v2Command(command: Command): Command {
+  switch (command.type) {
+    case "thread.turn.start": {
+      const message = object(command.message);
+      const run = typeof command.activeRunId === "string" ? command.activeRunId : null;
+      return {
+        type: "message.dispatch", commandId: command.commandId, threadId: command.threadId, createdBy: "user", creationSource: "web",
+        messageId: message.messageId, text: message.text, attachments: [],
+        dispatchMode: run ? { type: "steer_active", targetRunId: run } : { type: "start_immediately" },
+      } as Command;
+    }
+    case "thread.turn.interrupt":
+      if (typeof command.runId !== "string") fail("THREAD_IDLE", "The thread has no active run to interrupt.");
+      return { type: "run.interrupt", commandId: command.commandId, threadId: command.threadId, runId: command.runId, holdQueue: true };
+    case "thread.meta.update":
+      return { type: "thread.metadata.update", commandId: command.commandId, threadId: command.threadId, title: command.title };
+    default: {
+      const { createdAt: _createdAt, ...rest } = command;
+      return rest;
+    }
+  }
+}
+
+export async function dispatch(api: Api, command: Command) {
   try {
+    if (api.v2 && command.type === "thread.turn.start" && command.bootstrap) {
+      // Protocol 2 creates the thread, prepares its worktree and starts the first run in one RPC.
+      const launched = object(await api.rpc("orchestration.launchThread", launchInput(command)));
+      if (launched.threadId !== command.threadId) fail("INVALID_RESPONSE", "T3 launched a different thread than requested. Inspect the project before retrying.");
+      return { threadId: command.threadId, commandId: command.commandId, status: "accepted", sequence: 0 };
+    }
     // Bootstrap/worktree handling lives in T3's RPC layer, not HTTP dispatch.
-    const receipt = object(await api.rpc("orchestration.dispatchCommand", command));
+    const receipt = object(await api.rpc("orchestration.dispatchCommand", api.v2 ? v2Command(command) : command));
     if (typeof receipt.sequence !== "number") fail("INVALID_RESPONSE", "T3 returned an invalid dispatch receipt. Inspect the thread before retrying.");
     return { threadId: command.threadId, commandId: command.commandId, status: "accepted", sequence: receipt.sequence };
   } catch (error) {

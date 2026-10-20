@@ -80,7 +80,8 @@ export async function discover(name: string, config: Environment, signal?: Abort
   if (!response.ok) fail("SERVER_UNREACHABLE", `T3 descriptor returned HTTP ${response.status}.`);
   const descriptor = object(await response.json());
   const legacy = descriptor.orchestrationProtocolVersion === undefined && typeof descriptor.serverVersion === "string" && /^0\.0\.(42|43)(-|$)/.test(descriptor.serverVersion);
-  if ((!legacy && descriptor.orchestrationProtocolVersion !== 1) || typeof descriptor.environmentId !== "string" || typeof descriptor.serverVersion !== "string") fail("UNSUPPORTED_SERVER", "This CLI requires T3 orchestration protocol 1 or the known 0.0.42/43 legacy descriptor.");
+  // Protocol 2 (T3 0.1.0+): V2 orchestration. HTTP needs a protocol header and /ws a protocol query parameter.
+  if ((!legacy && descriptor.orchestrationProtocolVersion !== 1 && descriptor.orchestrationProtocolVersion !== 2) || typeof descriptor.environmentId !== "string" || typeof descriptor.serverVersion !== "string") fail("UNSUPPORTED_SERVER", "This CLI requires T3 orchestration protocol 1 or 2, or the known 0.0.42/43 legacy descriptor.");
   if (descriptor.capabilities !== undefined) object(descriptor.capabilities);
   return { name, home, origin: origin as string, descriptor: descriptor as Descriptor, config };
 }
@@ -114,12 +115,14 @@ export async function invocation(target: Target): Promise<{ command: string[]; e
 
 export class Api {
   constructor(public target: Target, private token: string, private signal?: AbortSignal, private authorization?: (method: string, url: string) => Promise<Record<string, string>>, private renewAuthorization?: () => Promise<void>) {}
+  /** T3 0.1.0+ (orchestration protocol 2). */
+  get v2() { return this.target.descriptor.orchestrationProtocolVersion === 2; }
   async request<T = unknown>(path: string, body?: unknown, renewed = false): Promise<T> {
     let response: Response;
     try {
       response = await fetch(`${this.target.origin}${path}`, {
         method: body === undefined ? "GET" : "POST", redirect: "error",
-        headers: { ...(this.authorization ? await this.authorization(body === undefined ? "GET" : "POST", `${this.target.origin}${path}`) : { authorization: `Bearer ${this.token}` }), ...(body === undefined ? {} : { "content-type": "application/json" }) },
+        headers: { ...(this.authorization ? await this.authorization(body === undefined ? "GET" : "POST", `${this.target.origin}${path}`) : { authorization: `Bearer ${this.token}` }), ...(this.v2 ? { "x-t3-orchestration-protocol": "2" } : {}), ...(body === undefined ? {} : { "content-type": "application/json" }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(this.signal ? [this.signal] : [])]),
       });
@@ -144,6 +147,7 @@ export class Api {
     const url = new URL("/ws", this.target.origin);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     url.searchParams.set("wsTicket", ticket.ticket);
+    if (this.v2) url.searchParams.set("orchestrationProtocol", "2");
     const signal = AbortSignal.any([AbortSignal.timeout(120_000), ...(this.signal ? [this.signal] : [])]);
     if (signal.aborted) fail("CANCELLED", "The request was cancelled before dispatch.");
     const id = crypto.randomUUID();
