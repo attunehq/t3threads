@@ -239,8 +239,9 @@ T3 owns sign-in and text-model selection. Warm Connect credentials with environm
         if ((c.options.action === "rename") !== Boolean(c.options.title)) fail("INVALID_ARGUMENT", "Supply title only when renaming.");
         return withTarget(c.options, c.request, async (api, target, id) => {
           if (c.options.action === "settle" && target.descriptor.capabilities?.threadSettlement !== true) fail("UNSUPPORTED_SERVER", "This T3 server does not support thread settlement.");
-          await readThread(api, id!, 1);
-          const command = { type: c.options.action === "interrupt" ? "thread.turn.interrupt" : c.options.action === "rename" ? "thread.meta.update" : `thread.${c.options.action}`, threadId: id!, commandId: crypto.randomUUID(), ...(c.options.action === "interrupt" ? { createdAt: new Date().toISOString() } : {}), ...(c.options.title ? { title: c.options.title } : {}) };
+          const current = await readThread(api, id!, 1);
+          const runId = c.options.action === "interrupt" && api.v2 ? current.thread.activeRunId ?? undefined : undefined;
+          const command = { type: c.options.action === "interrupt" ? "thread.turn.interrupt" : c.options.action === "rename" ? "thread.meta.update" : `thread.${c.options.action}`, threadId: id!, commandId: crypto.randomUUID(), ...(c.options.action === "interrupt" ? { createdAt: new Date().toISOString() } : {}), ...(runId ? { runId } : {}), ...(c.options.title ? { title: c.options.title } : {}) };
           return { ...context(target), ...(c.options.dryRun ? { dryRun: true, command } : await dispatch(api, command)) };
         }, c.args.thread);
       },
